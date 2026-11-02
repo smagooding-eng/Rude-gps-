@@ -122,7 +122,7 @@ test('missing a turn triggers a reroute roast', () => {
 });
 
 test('profanity only appears when enabled', () => {
-  const swears = /shit|damn|hell|ass|crap/i;
+  const swears = /\b(shit|damn|hell|ass|dumbass|jackass|crap|goddamn|half-assed)\b/i;
   for (let i = 0; i < 200; i++) assert.doesNotMatch(pick('reroute', 4, false), swears);
   let hit = false;
   for (let i = 0; i < 200; i++) if (swears.test(pick('reroute', 4, true))) hit = true;
