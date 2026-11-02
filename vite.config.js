@@ -5,6 +5,8 @@ import { VitePWA } from 'vite-plugin-pwa';
 // BASE_PATH is set by the GitHub Pages workflow (e.g. /Rude-gps-/). Render and local dev use /.
 export default defineConfig({
   base: process.env.BASE_PATH || '/',
+  // The voice worker imports the neural TTS library, which code-splits.
+  worker: { format: 'es' },
   plugins: [
     react(),
     VitePWA({
