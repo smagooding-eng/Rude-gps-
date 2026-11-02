@@ -101,8 +101,11 @@ export default function App() {
 
   // Fetch the natural voice in the background as soon as it's selected.
   useEffect(() => {
-    if (settings.voiceEngine !== 'natural') return;
-    prepareNatural(settings.naturalVoice).catch(() => setToast("Couldn't download the natural voice. Using the phone voice."));
+    // Natural is also the backup for the AI actor when a clip is slow.
+    if (settings.voiceEngine === 'device') return;
+    prepareNatural(settings.naturalVoice).catch(() => {
+      if (settings.voiceEngine === 'natural') setToast("Couldn't download the natural voice. Using the phone voice.");
+    });
   }, [settings.voiceEngine, settings.naturalVoice]);
 
   // What the engine sees: the real settings, with the level forced to Nice on respectful trips.

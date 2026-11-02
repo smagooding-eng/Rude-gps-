@@ -24,11 +24,11 @@ export const AI_VOICES = ['ash', 'coral', 'onyx', 'nova', 'sage', 'ballad', 'ver
 
 const BASE_DIRECTION = 'You are the voice of a car navigation app. Read every direction, street name and distance clearly and at a natural pace; the attitude rides on top and never makes a direction hard to understand.';
 export const ACTING = [
-  'Calm, clear, friendly, professional.',
-  'Dry and lightly sarcastic, a hint of an eye-roll in the voice.',
-  'Deadpan snark. Exasperated, with small audible sighs and a judgmental tone.',
-  'Openly fed up and roasting the driver. Biting, theatrical contempt and sharp comic timing.',
-  'Unhinged and dramatic, on the edge of a breakdown. Over-the-top exasperation, sudden bursts of intensity, great comic timing.',
+  'Calm, warm and professional, like a premium car navigation voice.',
+  'A dry, witty co-pilot. Light sarcasm, a smirk you can hear, a tiny pause before any joke.',
+  'A deadpan, exasperated stand-up comic. Audible sighs, judgmental emphasis on key words, a beat of silence before the punchline, then land it.',
+  'A savage roast-battle comedian who is genuinely fed up with this driver. Biting contempt, big theatrical emphasis, scoffs and exasperated breaths, perfect comic timing on every insult.',
+  'A completely unhinged, melodramatic narrator on the edge of a breakdown. Wild swings from fake calm to sudden outbursts, dramatic gasps, cracking voice, over-the-top despair, and impeccable comic timing.',
 ];
 
 let opts = { naturalVoice: 'en_US-hfc_male-medium', onNaturalProgress: null, engine: 'device', voiceURI: '', rate: 1, pitch: 1, muted: false, aiKey: '', aiVoice: 'ash', level: 2, onAiError: null };
@@ -211,6 +211,22 @@ function timeout(ms) {
   return new Promise((r) => setTimeout(() => r('timeout'), ms));
 }
 
+function playBuffer(buf) {
+  return new Promise((resolve) => {
+    const ac = audioCtx();
+    const src = ac.createBufferSource();
+    src.buffer = buf;
+    src.playbackRate.value = opts.rate;
+    src.connect(ac.destination);
+    src.onended = () => {
+      current = null;
+      resolve();
+    };
+    current = src;
+    src.start();
+  });
+}
+
 async function pump() {
   if (playing) return;
   playing = true;
@@ -220,7 +236,21 @@ async function pump() {
     const buf = await (item.urgent ? Promise.race([item.clip, timeout(1500)]) : Promise.race([item.clip, timeout(6000)]));
     if (gen !== generation) break;
     if (!buf || buf === 'timeout') {
-      // Too slow or failed: say it with the device voice so the direction isn't lost.
+      // Too slow or failed. Prefer the downloaded natural voice, else the phone voice,
+      // so the direction is never lost.
+      if (opts.engine === 'ai' && readyVoices.has(opts.naturalVoice)) {
+        const nb = await Promise.race([
+          ask({ type: 'predict', text: item.text, voiceId: opts.naturalVoice })
+            .then((m) => new Promise((res, rej) => audioCtx().decodeAudioData(m.buf, res, rej)))
+            .catch(() => null),
+          timeout(2500),
+        ]);
+        if (gen !== generation) break;
+        if (nb && nb !== 'timeout') {
+          await playBuffer(nb);
+          continue;
+        }
+      }
       await new Promise((resolve) => {
         if (!synth) return resolve();
         const u = new SpeechSynthesisUtterance(item.text);
@@ -234,17 +264,7 @@ async function pump() {
       });
       continue;
     }
-    await new Promise((resolve) => {
-      const ac = audioCtx();
-      const src = ac.createBufferSource();
-      src.buffer = buf;
-      src.playbackRate.value = opts.rate;
-      src.connect(ac.destination);
-      src.onended = resolve;
-      current = src;
-      src.start();
-    });
-    current = null;
+    await playBuffer(buf);
   }
   playing = false;
   if (queue.length && gen !== generation) pump();

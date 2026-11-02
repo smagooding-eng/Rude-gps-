@@ -124,9 +124,10 @@ export default function SettingsSheet({ settings, update, onClose, voiceProgress
           ) : (
             <>
               <p className="hint">
-                Uses OpenAI&rsquo;s text-to-speech with acting directions that match the rudeness level. Paste your own
-                API key from platform.openai.com. It stays on this phone only. Costs a few cents per long drive.
-                If a clip is slow or there&rsquo;s no signal, the phone voice covers so you never miss a turn.
+                A real voice actor that gets more theatrical as the rudeness goes up. Paste your own OpenAI API key
+                (platform.openai.com → API keys). It stays on this phone only and costs a few cents per long drive.
+                If a clip is slow or there&rsquo;s no signal, the Natural voice covers so you never miss a turn.
+                Try Ash, Coral or Ballad at Savage or Unhinged.
               </p>
               <input
                 id="aiKey"
