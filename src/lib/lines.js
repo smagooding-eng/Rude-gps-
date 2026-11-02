@@ -156,19 +156,45 @@ const POOLS = {
 
 Object.assign(POOLS, SPEED_POOLS, COMMAND_POOLS, DEST_POOLS, REPORT_POOLS);
 
-const recent = new Map();
+import { generate, hasGenerated } from './roastGen.js';
+import { load, save } from './storage.js';
 
+// Lines heard recently, remembered across drives so they don't repeat.
+const HEARD_KEY = 'rudegps.heard.v1';
+const heard = load(HEARD_KEY, []);
+const heardSet = new Set(heard);
+let saveTimer = null;
+function remember(line) {
+  heard.push(line);
+  heardSet.add(line);
+  while (heard.length > 600) heardSet.delete(heard.shift());
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => save(HEARD_KEY, heard), 2000);
+}
+
+// Plain lines (level 0) and event summaries can repeat; roasts shouldn't.
 export function pick(event, level, profanity, vars = {}) {
-  const pool = POOLS[event];
-  if (!pool) return '';
+  const pool = POOLS[event] || {};
   let options = [...(pool[level] || [])];
   if (profanity && level >= 3 && pool[`x${level}`]) options = options.concat(pool[`x${level}`], pool[`x${level}`]);
+  const fresh = options.filter((o) => !heardSet.has(fill(o, vars)));
+  const gen = hasGenerated(event, level);
+
+  // Mostly generated lines (thousands of combos); hand-written ones mixed in while unheard.
+  if (gen && (!fresh.length || Math.random() < 0.6)) {
+    for (let i = 0; i < 12; i++) {
+      const line = fill(generate(event, level, profanity), vars);
+      if (line && !heardSet.has(line)) {
+        remember(line);
+        return line;
+      }
+    }
+  }
   if (!options.length) return '';
-  const used = recent.get(event) || [];
-  const fresh = options.filter((o) => !used.includes(o));
-  const choice = (fresh.length ? fresh : options)[Math.floor(Math.random() * (fresh.length || options.length))];
-  recent.set(event, [...used, choice].slice(-Math.max(1, Math.floor(options.length / 2))));
-  return fill(choice, vars);
+  const list = fresh.length ? fresh : options;
+  const line = fill(list[Math.floor(Math.random() * list.length)], vars);
+  if (level > 0) remember(line);
+  return line;
 }
 
 function fill(s, vars) {

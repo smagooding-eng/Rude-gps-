@@ -117,7 +117,7 @@ test('savage level keeps the instruction first, then the roast', () => {
 test('missing a turn triggers a reroute roast', () => {
   const { said, arrived } = drive({ level: 4, missTurn: true });
   console.log('\n  ' + said.join('\n  '));
-  assert.ok(said.some((s) => s.includes('ecalculating') || /freestyling|other plans|my life/.test(s)));
+  assert.ok(said.some((s) => /ecalculating|freestyling|other plans|my life|route|detour|plan/i.test(s)));
   assert.ok(arrived);
 });
 
