@@ -31,6 +31,44 @@ export const SPEED_POOLS = {
   },
 };
 
+export const REPORT_POOLS = {
+  hazardQuip_police: {
+    1: ['Be cool.', 'Nice and legal now.'],
+    2: ["Act natural. You're terrible at it, but try.", 'Hands at ten and two. Pretend you know what that means.'],
+    3: ['Drive like you have nothing to hide. I know, I know.', "Maybe don't do whatever you were about to do."],
+    4: ['Police ahead. Finally, someone else to judge your driving.', "Police ahead. Please don't make me testify."],
+    x3: ['Be cool, damn it.'],
+    x4: ["Don't do anything dumb as hell."],
+  },
+  reported: {
+    0: ['Reported. Thanks.'],
+    1: ['Reported. Thanks.', 'Got it. Reported.'],
+    2: ['Reported. Look at you, contributing.', 'Got it. Civic duty, achieved.'],
+    3: ["Reported. Other drivers owe you one. They'll never know.", 'Noted. First useful thing you did all drive.'],
+    4: ["Reported. You're basically a traffic reporter now. Unpaid.", 'Reported. I am almost proud. Almost.'],
+  },
+  reported_police: {
+    2: ['Police reported. Narc. Kidding. Thanks.'],
+    3: ['Police reported. Snitches get... directions. Thanks.'],
+    4: ['Police reported. The whole road thanks you. The cops, less so.'],
+  },
+  reportFail: {
+    0: ["Couldn't send that report."],
+    2: ["Report didn't go through. Even the internet ignores you."],
+    4: ['Report failed. The servers have seen your driving and declined.'],
+  },
+  askConfirm: {
+    0: ['Was it still there? Say yes or gone.'],
+    2: ['Was that still there? Say yes or gone.'],
+    3: ['Was it still there, or did someone make that up? Say yes or gone.'],
+  },
+  voteThanks: {
+    0: ['Thanks.'],
+    2: ['Noted.'],
+    4: ['Noted. Your contribution has been grudgingly accepted.'],
+  },
+};
+
 export const COMMAND_POOLS = {
   cmd_quiet: {
     0: ['Okay. Directions only.'],

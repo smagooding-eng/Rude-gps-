@@ -206,3 +206,16 @@ select { width: 100%; padding: 12px; border-radius: 12px; background: var(--asph
 @media (prefers-reduced-motion: reduce) {
   .user-pulse, .icon-btn.mic.live { animation: none; }
 }
+
+/* ---------- v3: driver reports ---------- */
+.report-fab { position: absolute; z-index: 5; left: calc(12px + env(safe-area-inset-left, 0px)); bottom: calc(var(--safe-bottom) + 130px); display: flex; align-items: center; gap: 6px; background: var(--caution); color: var(--caution-ink); padding: 12px 16px; border-radius: 999px; font-weight: 900; font-size: 15px; box-shadow: var(--shadow); }
+.report-fab:active { transform: scale(.96); }
+.report-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 12px; }
+.report-tile { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 16px 6px; border-radius: 16px; background: var(--asphalt-2); border: 2px solid transparent; font-weight: 800; font-size: 15px; }
+.report-tile:active, .report-tile:focus-visible { border-color: var(--hz); }
+.report-icon { width: 58px; height: 58px; border-radius: 50%; background: var(--hz); display: grid; place-items: center; }
+.report-sheet .hint { margin-top: 14px; }
+.hint.warn { color: #ffb020; }
+.confirm-card { position: absolute; z-index: 7; left: 12px; right: 12px; bottom: calc(var(--safe-bottom) + 190px); display: flex; align-items: center; gap: 8px; background: var(--asphalt); border: 1px solid var(--hz); border-radius: 16px; padding: 8px 10px; box-shadow: var(--shadow); animation: rise .25s ease-out; }
+.confirm-card strong { flex: 1; min-width: 0; font-size: 15px; }
+.confirm-card .chip { padding: 10px 16px; font-size: 14px; }

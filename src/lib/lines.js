@@ -1,4 +1,4 @@
-import { SPEED_POOLS, COMMAND_POOLS, DEST_POOLS } from './extraLines.js';
+import { SPEED_POOLS, COMMAND_POOLS, DEST_POOLS, REPORT_POOLS } from './extraLines.js';
 
 // Everything the GPS says. Rule: the actual instruction is always spoken
 // first and plainly. The rudeness rides along after it, never instead of it.
@@ -154,7 +154,7 @@ const POOLS = {
   },
 };
 
-Object.assign(POOLS, SPEED_POOLS, COMMAND_POOLS, DEST_POOLS);
+Object.assign(POOLS, SPEED_POOLS, COMMAND_POOLS, DEST_POOLS, REPORT_POOLS);
 
 const recent = new Map();
 
@@ -175,7 +175,7 @@ function fill(s, vars) {
   return s.replace(/\{(\w+)\}/g, (_, k) => vars[k] ?? '');
 }
 
-const QUIP_POOL = { camera: 'camera', redlight: 'camera', crash: 'crash', roadwork: 'work', lane: 'work', jam: 'jam' };
+const QUIP_POOL = { police: 'police', camera: 'camera', redlight: 'camera', crash: 'crash', roadwork: 'work', lane: 'work', jam: 'jam' };
 
 export function hazardQuip(kind, level, profanity) {
   if (level === 0) return '';
@@ -187,6 +187,7 @@ export function hazardSentence(h, dist) {
   const at = `ahead in ${dist}`;
   const desc = (h.description || '').replace(/\.$/, '');
   switch (h.kind) {
+    case 'police': return `Police reported ${at}.`;
     case 'crash': return `Crash reported ${at}.`;
     case 'closure': return `Road closure reported ${at}.`;
     case 'lane': return `Lane closed ${at}.`;

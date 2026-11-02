@@ -9,8 +9,10 @@ const TURNISH = new Set(['turn', 'end of road', 'continue', 'fork', 'off ramp', 
  * second, and it decides what to say and when.
  */
 export class NavEngine {
-  constructor({ route, destName, destCategory = 'other', getSettings, say, prefetch, onState, onReroute, onArrive, onLevel, simulated = false, now = () => Date.now(), random = Math.random }) {
-    Object.assign(this, { destName, destCategory, getSettings, sayFn: say, prefetchFn: prefetch, onState, onReroute, onArrive, onLevel, simulated, now, random });
+  constructor({ route, destName, destCategory = 'other', getSettings, say, prefetch, onState, onReroute, onArrive, onLevel, onReport, onVote, onAskConfirm, simulated = false, now = () => Date.now(), random = Math.random }) {
+    Object.assign(this, { destName, destCategory, getSettings, sayFn: say, prefetchFn: prefetch, onState, onReroute, onArrive, onLevel, onReport, onVote, onAskConfirm, simulated, now, random });
+    this.ownReports = new Set();
+    this.asked = new Set();
     this.quiet = false;
     this.lastInstruction = '';
     this.passedHazards = new Set();
@@ -110,7 +112,7 @@ export class NavEngine {
 
   _checkHazards(units, level, prof) {
     for (const h of this.hazards) {
-      if (this.warnedHazards.has(h.id)) continue;
+      if (this.warnedHazards.has(h.id) || this.ownReports.has(h.reportId)) continue;
       const d = h.along - this.progress;
       if (d < 0) continue;
       const isCam = h.kind === 'camera' || h.kind === 'redlight';
@@ -123,6 +125,18 @@ export class NavEngine {
       const q = this.random() < chance ? hazardQuip(h.kind, level, prof) : '';
       this._say(`${hazardSentence(h, spokenDistance(d, units))}${q ? ` ${q}` : ''}`);
       return; // one per update
+    }
+    // Ask other drivers' reports "still there?" once we've driven past.
+    for (const h of this.hazards) {
+      if (h.along > this.progress) break;
+      if (h.source !== 'Drivers' || this.asked.has(h.id) || this.ownReports.has(h.reportId)) continue;
+      const past = this.progress - h.along;
+      if (past < 60) continue;
+      this.asked.add(h.id);
+      if (past > 400) continue;
+      this.onAskConfirm?.(h);
+      this._say(pick('askConfirm', level, prof) || pick('askConfirm', 0, false));
+      return;
     }
     // A parting shot once a camera or crash is behind us.
     if (level >= 2) {
@@ -207,6 +221,10 @@ export class NavEngine {
         say('cmd_meaner', next);
         break;
       }
+      case 'vote_yes':
+      case 'vote_no':
+        this.onVote?.(name === 'vote_yes');
+        break;
       case 'repeat':
         if (this.lastInstruction) this._say(this.lastInstruction, { interrupt: true });
         break;
@@ -223,6 +241,10 @@ export class NavEngine {
         if (this.lastInstruction) this._say(this.lastInstruction);
         break;
       default:
+        if (name.startsWith('report_')) {
+          this.onReport?.(name.slice(7));
+          break;
+        }
         say(`cmd_${name}`, this.quiet ? 0 : level);
     }
   }

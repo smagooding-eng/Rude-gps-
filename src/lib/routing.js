@@ -5,8 +5,10 @@ import { cumulative, distance } from './geo.js';
 const OSRM = 'https://router.project-osrm.org/route/v1/driving';
 
 export async function fetchRoute(from, to, signal) {
-  const url = `${OSRM}/${from[0]},${from[1]};${to[0]},${to[1]}?overview=full&geometries=geojson&steps=true&annotations=maxspeed`;
-  const res = await fetch(url, { signal });
+  const base = `${OSRM}/${from[0]},${from[1]};${to[0]},${to[1]}?overview=full&geometries=geojson&steps=true`;
+  let res = await fetch(`${base}&annotations=nodes`, { signal });
+  // If the server rejects the extra option, plain routing still has to work.
+  if (res.status === 400) res = await fetch(base, { signal });
   if (!res.ok) throw new Error(`Routing service error (${res.status})`);
   return parseOsrm(await res.json());
 }
@@ -56,5 +58,8 @@ export function parseOsrm(data) {
     });
     if (!maxspeed.some((v) => v != null)) maxspeed = null;
   }
-  return { coords, cum, distance: r.distance, duration: r.duration, steps, maxspeed };
+  // OSM node ids per geometry point (used to look up speed limits later).
+  const nodeList = r.legs.flatMap((l, i) => (i === 0 ? l.annotation?.nodes || [] : (l.annotation?.nodes || []).slice(1)));
+  const nodes = nodeList.length === coords.length ? nodeList : null;
+  return { coords, cum, distance: r.distance, duration: r.duration, steps, maxspeed, nodes };
 }

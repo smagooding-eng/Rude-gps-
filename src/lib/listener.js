@@ -8,6 +8,14 @@ export const listenSupported = !!SR;
 
 // Ordered: first match wins.
 const COMMANDS = [
+  ['report_police', /\b(report (a |the )?(cop|cops|police)|cops? (ahead|here|up here)|police (ahead|here|up here)|speed trap)\b/],
+  ['report_crash', /\b(report (a |an |the )?(crash|accident|wreck)|(crash|accident|wreck) (ahead|here))\b/],
+  ['report_hazard', /\b(report (a |the )?(hazard|debris|pothole|object)|(hazard|debris|pothole) (ahead|here))\b/],
+  ['report_traffic', /\b(report (the )?traffic|traffic jam here)\b/],
+  ['report_construction', /\b(report (the )?(construction|road work|roadwork))\b/],
+  ['report_closure', /\b(report (a |the )?(closure|road closed)|road (is )?closed)\b/],
+  ['vote_yes', /\b(yes|yeah|yep|still there|it's there)\b/],
+  ['vote_no', /\b(gone|no|nope|not there|it's gone|nothing there)\b/],
   ['quiet', /\b(shut up|shut it|be quiet|quiet|stop talking|zip it|silence|hush|enough)\b/],
   ['talk', /\b(you can talk|talk to me|speak up|unmute|i miss you|say something)\b/],
   ['nicer', /\b(be nice|nicer|be nicer|calm down|chill|tone it down|be polite)\b/],
@@ -19,14 +27,19 @@ const COMMANDS = [
   ['lost', /\b(i'?m lost|where am i|where are we)\b/],
 ];
 
-export function matchCommand(text) {
+// "yes"/"gone" only count right after the GPS asks "still there?".
+export function matchCommand(text, { voting = false } = {}) {
   const t = ` ${text.toLowerCase()} `;
-  for (const [name, re] of COMMANDS) if (re.test(t)) return name;
+  for (const [name, re] of COMMANDS) {
+    if (!voting && name.startsWith('vote_')) continue;
+    if (re.test(t)) return name;
+  }
   return null;
 }
 
 export class Listener {
-  constructor({ onCommand, onState, isSpeaking }) {
+  constructor({ onCommand, onState, isSpeaking, isVoting }) {
+    this.isVoting = isVoting;
     this.onCommand = onCommand;
     this.onState = onState;
     this.isSpeaking = isSpeaking;
@@ -64,7 +77,7 @@ export class Listener {
       for (let i = e.resultIndex; i < e.results.length; i++) {
         const r = e.results[i];
         for (let a = 0; a < r.length; a++) {
-          const cmd = matchCommand(r[a].transcript || '');
+          const cmd = matchCommand(r[a].transcript || '', { voting: !!this.isVoting?.() });
           if (cmd && Date.now() - this.lastCmdAt > 2500) {
             this.lastCmdAt = Date.now();
             this.onCommand?.(cmd, r[a].transcript);

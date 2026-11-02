@@ -3,7 +3,10 @@ import MapView from './components/MapView.jsx';
 import SearchBar from './components/SearchBar.jsx';
 import SettingsSheet from './components/SettingsSheet.jsx';
 import { NavBanner, NavFooter, HazardChip, SpeedSign } from './components/NavPanel.jsx';
-import { loadHazards } from './lib/hazards.js';
+import { loadHazards, onRoute } from './lib/hazards.js';
+import { fetchSpeedLimits } from './lib/speedLimits.js';
+import { addReport, voteReport, reportsEnabled, REPORT_KINDS } from './lib/reports.js';
+import { ReportButton, ReportSheet, ConfirmCard } from './components/ReportSheet.jsx';
 import { Listener, listenSupported } from './lib/listener.js';
 import { RESPECT_CATEGORIES } from './lib/extraLines.js';
 import { fetchRoute } from './lib/routing.js';
@@ -52,6 +55,12 @@ export default function App() {
   const [hazards, setHazards] = useState([]);
   const [listen, setListen] = useState('off');
   const [demoMode, setDemoMode] = useState('normal');
+  const [showReport, setShowReport] = useState(false);
+  const [confirmAsk, setConfirmAsk] = useState(null);
+  const confirmRef = useRef(null);
+  confirmRef.current = confirmAsk;
+  const localReports = useRef([]);
+  const ttCache = useRef({ route: null, list: [], at: 0 });
   const listenerRef = useRef(null);
   const hazardTimer = useRef(null);
   const hazardCtrl = useRef(null);
@@ -167,25 +176,47 @@ export default function App() {
   }, [phase, acquireWake]);
 
   /* ---------- Hazards ---------- */
+  const publishHazards = useCallback((r, list) => {
+    const mine = onRoute(localReports.current, r);
+    const ids = new Set(list.map((h) => h.reportId).filter(Boolean));
+    const merged = [...list, ...mine.filter((h) => !ids.has(h.reportId))].sort((a, b) => a.along - b.along);
+    setHazards(merged);
+    engineRef.current?.setHazards(merged);
+  }, []);
+
+  // TomTom is limited to 2,500 lookups a month, so it refreshes every 5 minutes at most;
+  // cameras and driver reports refresh every minute.
   const refreshHazards = useCallback(async (r) => {
     const s = settingsRef.current;
-    if (!r || (!s.tomtomKey && !s.cameras)) {
-      setHazards([]);
-      engineRef.current?.setHazards([]);
-      return;
-    }
+    if (!r) return;
     hazardCtrl.current?.abort();
     const ctrl = new AbortController();
     hazardCtrl.current = ctrl;
+    const tt = ttCache.current;
+    const ttFresh = tt.route === r && Date.now() - tt.at < 5 * 60 * 1000;
     try {
-      const { hazards: list, errors } = await loadHazards(r, { tomtomKey: s.tomtomKey, cameras: s.cameras }, ctrl.signal);
+      const [main, fresh] = await Promise.all([
+        loadHazards(r, { tomtomKey: '', cameras: s.cameras, reports: true }, ctrl.signal),
+        s.tomtomKey && !ttFresh ? loadHazards(r, { tomtomKey: s.tomtomKey, cameras: false, reports: false }, ctrl.signal) : null,
+      ]);
       if (ctrl.signal.aborted || routeRef.current !== r) return;
-      setHazards(list);
-      engineRef.current?.setHazards(list);
+      if (fresh) ttCache.current = { route: r, list: fresh.hazards, at: Date.now() };
+      const ttList = s.tomtomKey ? ttCache.current.route === r ? ttCache.current.list : [] : [];
+      publishHazards(r, onRoute([...main.hazards, ...ttList], r));
+      const errors = [...main.errors, ...(fresh?.errors || [])];
       if (errors.length) setToast(errors[0]);
     } catch {
       /* network hiccup: keep the old list */
     }
+  }, [publishHazards]);
+
+  // Speed limits arrive a moment after the route; the engine and demo read them live.
+  const attachLimits = useCallback((r) => {
+    fetchSpeedLimits(r)
+      .then((ms) => {
+        if (ms) r.maxspeed = ms;
+      })
+      .catch(() => {});
   }, []);
 
   /* ---------- Planning ---------- */
@@ -210,6 +241,7 @@ export default function App() {
         setRoute(r);
         routeRef.current = r;
         refreshHazards(r);
+        attachLimits(r);
         const s = settingsRef.current;
         const respect = RESPECT_CATEGORIES.has(place.category);
         setPreviewQuip(
@@ -223,7 +255,7 @@ export default function App() {
         if (planCtrl.current === ctrl) setLoading(false);
       }
     },
-    [gps, manualStart, refreshHazards],
+    [gps, manualStart, refreshHazards, attachLimits],
   );
 
   const onMapClick = useCallback(
@@ -248,6 +280,9 @@ export default function App() {
     setLoading(false);
     hazardCtrl.current?.abort();
     setHazards([]);
+    setConfirmAsk(null);
+    localReports.current = [];
+    ttCache.current = { route: null, list: [], at: 0 };
   }, []);
 
   /* ---------- Navigation ---------- */
@@ -273,11 +308,12 @@ export default function App() {
       engineRef.current.setRoute(r, true);
       simRef.current?.setRoute(r, from);
       refreshHazards(r);
+      attachLimits(r);
     } catch {
       engineRef.current?.rerouteFailed();
       setToast("Couldn't reroute. I'll try again in a few seconds.");
     }
-  }, [refreshHazards]);
+  }, [refreshHazards, attachLimits]);
 
   const handleArrive = useCallback(() => {
     stopRunning();
@@ -296,6 +332,9 @@ export default function App() {
         getSettings: engineSettings,
         say: speak,
         prefetch: (t) => voice.prefetch(t),
+        onReport: (type) => submitRef.current?.(type),
+        onVote: (up) => voteRef.current?.(up),
+        onAskConfirm: (h) => setConfirmAsk({ h, at: Date.now() }),
         onLevel: (lvl) => {
           update({ level: lvl });
           setToast(`Rudeness: ${LEVELS[lvl].name}`);
@@ -314,8 +353,8 @@ export default function App() {
       eng.setHazards(hazards);
       eng.start();
       if (respectRef.current) setToast('No jokes on this trip. Drive safe.');
-      if (settingsRef.current.tomtomKey) {
-        hazardTimer.current = setInterval(() => refreshHazards(routeRef.current), 5 * 60 * 1000);
+      if (settingsRef.current.tomtomKey || settingsRef.current.cameras || reportsEnabled) {
+        hazardTimer.current = setInterval(() => refreshHazards(routeRef.current), 60 * 1000);
       }
       if (isDemo) {
         const sim = new Simulator((pos) => {
@@ -334,6 +373,70 @@ export default function App() {
     [route, dest, gps, speak, handleReroute, handleArrive, acquireWake, engineSettings, hazards, refreshHazards, update, demoMode],
   );
 
+  /* ---------- Driver reports ---------- */
+  const submitRef = useRef(null);
+  const voteRef = useRef(null);
+  const liveRef = useRef({});
+  liveRef.current = { demo, simPos, gps, nav };
+
+  const sayLine = useCallback((pool, alt) => {
+    const s = engineSettings();
+    const line = (alt && pick(alt, s.level, s.profanity)) || pick(pool, s.level, s.profanity) || pick(pool, 0, false);
+    if (line) speak(line);
+  }, [engineSettings, speak]);
+
+  submitRef.current = async (type) => {
+    setShowReport(false);
+    const { demo: isDemo, simPos: sp, gps: g, nav: n } = liveRef.current;
+    const pos = isDemo ? sp : g;
+    if (!pos) {
+      setToast('No location yet, so there is nothing to pin the report to.');
+      return;
+    }
+    const heading = n?.routeBearing ?? pos.heading ?? null;
+    const kind = REPORT_KINDS.find((k) => k.id === type)?.kind || 'hazard';
+    const local = (id) => ({ id: `rp-${id}`, reportId: id, kind, source: 'Drivers', coords: pos.coords, heading, description: '', own: true });
+
+    if (isDemo || !reportsEnabled) {
+      const id = `local-${Date.now()}`;
+      engineRef.current?.ownReports.add(id);
+      localReports.current.push(local(id));
+      if (routeRef.current) publishHazards(routeRef.current, hazards.filter((h) => !h.own));
+      sayLine('reported', type === 'police' ? 'reported_police' : null);
+      setToast(isDemo ? 'Demo report: only on this phone, not shared.' : "Saved on this phone. Shared reports aren't switched on yet.");
+      return;
+    }
+    try {
+      const id = await addReport(type, pos.coords, heading);
+      engineRef.current?.ownReports.add(id);
+      localReports.current.push(local(id));
+      if (routeRef.current) publishHazards(routeRef.current, hazards.filter((h) => !h.own));
+      sayLine('reported', type === 'police' ? 'reported_police' : null);
+    } catch (e) {
+      sayLine('reportFail');
+      setToast(e.message);
+    }
+  };
+
+  voteRef.current = async (up) => {
+    const ask = confirmRef.current;
+    setConfirmAsk(null);
+    if (!ask) return;
+    sayLine('voteThanks');
+    if (liveRef.current.demo || !reportsEnabled || String(ask.h.reportId).startsWith('local-')) return;
+    try {
+      await voteReport(ask.h.reportId, up);
+    } catch {
+      /* a lost vote is no big deal */
+    }
+  };
+
+  useEffect(() => {
+    if (!confirmAsk) return undefined;
+    const t = setTimeout(() => setConfirmAsk(null), 20000);
+    return () => clearTimeout(t);
+  }, [confirmAsk]);
+
   const toggleMic = useCallback(() => {
     if (listenerRef.current?.on) {
       listenerRef.current.stop();
@@ -347,6 +450,7 @@ export default function App() {
         if (st === 'denied') setToast('Microphone is blocked. Allow it in your browser settings to talk back.');
       },
       isSpeaking: () => voice.speaking,
+      isVoting: () => !!confirmRef.current && Date.now() - confirmRef.current.at < 20000,
     });
     listenerRef.current.start();
   }, []);
@@ -448,6 +552,16 @@ export default function App() {
           <svg viewBox="0 0 24 24" width="18" height="18"><path d="M12 3 19 20 12 16 5 20Z" /></svg>
           Re-center
         </button>
+      )}
+
+      {phase === 'nav' && <ReportButton onClick={() => setShowReport(true)} />}
+      {phase === 'nav' && <ConfirmCard hazard={confirmAsk?.h} onVote={(up) => voteRef.current?.(up)} />}
+      {showReport && (
+        <ReportSheet
+          onPick={(t) => submitRef.current?.(t)}
+          onClose={() => setShowReport(false)}
+          note={!reportsEnabled ? "Shared reports aren't switched on yet, so reports stay on this phone." : demo ? 'Demo drive: reports stay on this phone.' : ''}
+        />
       )}
 
       {phase === 'preview' && (

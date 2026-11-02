@@ -2,6 +2,7 @@
 //  - TomTom Traffic Incidents (crashes, closures, road work, hazards, jams). Needs a free key.
 //  - OpenStreetMap speed / red-light cameras via Overpass. No key.
 import { bearing, distance, nearestOnRoute } from './geo.js';
+import { fetchReports, reportsEnabled } from './reports.js';
 
 const TOMTOM = 'https://api.tomtom.com/traffic/services/5/incidentDetails';
 const OVERPASS = 'https://overpass-api.de/api/interpreter';
@@ -98,7 +99,7 @@ export function onRoute(hazards, route) {
   for (const h of hazards) {
     if (seen.has(h.id)) continue;
     const near = nearestOnRoute(h.coords, route.coords, route.cum);
-    const maxOff = h.source === 'TomTom' ? 70 : 45;
+    const maxOff = h.source === 'TomTom' ? 70 : h.source === 'Drivers' ? 60 : 45;
     if (near.dist > maxOff) continue;
     if (h.heading != null && angleDiff(h.heading, near.bearing) > 100) continue;
     // De-dupe cameras mapped twice a few meters apart.
@@ -109,11 +110,12 @@ export function onRoute(hazards, route) {
   return out.sort((a, b) => a.along - b.along);
 }
 
-export async function loadHazards(route, { tomtomKey, cameras }, signal) {
+export async function loadHazards(route, { tomtomKey, cameras, reports = true }, signal) {
   const boxes = routeBoxes(route.coords, route.cum);
   const jobs = [];
   if (tomtomKey) jobs.push(fetchTomTom(boxes, tomtomKey, signal));
   if (cameras) jobs.push(fetchCameras(boxes, signal));
+  if (reports && reportsEnabled) jobs.push(fetchReports(boxes, signal));
   const results = await Promise.allSettled(jobs);
   const list = results.flatMap((r) => (r.status === 'fulfilled' ? r.value : []));
   const errors = results.filter((r) => r.status === 'rejected' && r.reason?.name !== 'AbortError').map((r) => r.reason.message);

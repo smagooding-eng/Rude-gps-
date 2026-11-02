@@ -1,5 +1,6 @@
 // Small inline SVG glyphs for hazard markers and the alert banner.
 export const HAZARD_STYLE = {
+  police: { color: '#3b82f6', label: 'Police' },
   crash: { color: '#ff3b5c', label: 'Crash' },
   closure: { color: '#ff3b5c', label: 'Road closed' },
   lane: { color: '#ff8a3b', label: 'Lane closed' },
@@ -13,6 +14,7 @@ export const HAZARD_STYLE = {
 };
 
 const GLYPH = {
+  police: '<path d="M12 3.5 19 6v5.5c0 4.2-2.9 7.6-7 9-4.1-1.4-7-4.8-7-9V6Z" fill="none" stroke="#fff" stroke-width="2" stroke-linejoin="round"/><path d="m12 8 1.2 2.5 2.7.3-2 1.9.5 2.7L12 14.1l-2.4 1.3.5-2.7-2-1.9 2.7-.3Z" fill="#fff"/>',
   crash: '<path d="M12 5 21 19H3Z" fill="none" stroke="#fff" stroke-width="2.2" stroke-linejoin="round"/><path d="M12 10v4M12 16.5v.5" stroke="#fff" stroke-width="2.2" stroke-linecap="round"/>',
   closure: '<circle cx="12" cy="12" r="7.5" fill="none" stroke="#fff" stroke-width="2.2"/><path d="M8 12h8" stroke="#fff" stroke-width="2.6" stroke-linecap="round"/>',
   lane: '<path d="M8 5v14M16 5v3M16 11v3M16 17v2" stroke="#fff" stroke-width="2.2" stroke-linecap="round"/>',
