@@ -16,7 +16,7 @@ Real GPS on a phone needs HTTPS, so test live driving from the deployed site.
 
 ## Deploy
 
-**GitHub Pages (automatic):** every push to `main` builds, tests and publishes to `https://smagooding-eng.github.io/RudeGPS/` via `.github/workflows/pages.yml`. If the first run fails at the Pages step, set Settings → Pages → Source to **GitHub Actions** and re-run.
+**GitHub Pages (automatic):** every push to `main` builds, tests and publishes to `https://smagooding-eng.github.io/Rude-gps-/` via `.github/workflows/pages.yml`. If the first run fails at the Pages step, set Settings → Pages → Source to **GitHub Actions** and re-run.
 
 ### Render (alternative, free static site)
 

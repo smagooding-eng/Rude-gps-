@@ -2,7 +2,7 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { VitePWA } from 'vite-plugin-pwa';
 
-// BASE_PATH is set by the GitHub Pages workflow (e.g. /RudeGPS/). Render and local dev use /.
+// BASE_PATH is set by the GitHub Pages workflow (e.g. /Rude-gps-/). Render and local dev use /.
 export default defineConfig({
   base: process.env.BASE_PATH || '/',
   plugins: [
