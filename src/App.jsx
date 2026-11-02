@@ -2,7 +2,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import MapView from './components/MapView.jsx';
 import SearchBar from './components/SearchBar.jsx';
 import SettingsSheet from './components/SettingsSheet.jsx';
-import { NavBanner, NavFooter } from './components/NavPanel.jsx';
+import { NavBanner, NavFooter, HazardChip, SpeedSign } from './components/NavPanel.jsx';
+import { loadHazards } from './lib/hazards.js';
+import { Listener, listenSupported } from './lib/listener.js';
+import { RESPECT_CATEGORIES } from './lib/extraLines.js';
 import { fetchRoute } from './lib/routing.js';
 import { NavEngine } from './lib/navEngine.js';
 import { Simulator } from './lib/simulator.js';
@@ -46,6 +49,14 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [previewQuip, setPreviewQuip] = useState('');
+  const [hazards, setHazards] = useState([]);
+  const [listen, setListen] = useState('off');
+  const [demoMode, setDemoMode] = useState('normal');
+  const listenerRef = useRef(null);
+  const hazardTimer = useRef(null);
+  const hazardCtrl = useRef(null);
+  const routeRef = useRef(null);
+  routeRef.current = route;
 
   const engineRef = useRef(null);
   const simRef = useRef(null);
@@ -58,11 +69,32 @@ export default function App() {
   destRef.current = dest;
 
   const systemDark = useSystemDark();
-  const theme = settings.mapTheme === 'auto' ? (systemDark ? 'dark' : 'light') : settings.mapTheme;
+  const theme = settings.mapTheme === 'auto' ? (systemDark ? 'night' : 'day') : settings.mapTheme;
+
+  // Hospitals, funerals, places of worship: the GPS drops the act for the trip.
+  const respectful = !!dest && RESPECT_CATEGORIES.has(dest.category);
+  const respectRef = useRef(false);
+  respectRef.current = respectful;
+  const effLevel = respectful ? 0 : settings.level;
 
   useEffect(() => {
-    voice.configure({ voiceURI: settings.voiceURI, rate: settings.rate, muted: settings.muted });
-  }, [settings.voiceURI, settings.rate, settings.muted]);
+    voice.configure({
+      voiceURI: settings.voiceURI,
+      rate: settings.rate,
+      muted: settings.muted,
+      engine: settings.voiceEngine,
+      aiKey: settings.aiKey,
+      aiVoice: settings.aiVoice,
+      level: effLevel,
+      onAiError: (msg) => setToast(`${msg} Using the phone voice for now.`),
+    });
+  }, [settings.voiceURI, settings.rate, settings.muted, settings.voiceEngine, settings.aiKey, settings.aiVoice, effLevel]);
+
+  // What the engine sees: the real settings, with the level forced to Nice on respectful trips.
+  const engineSettings = useCallback(() => {
+    const s = settingsRef.current;
+    return respectRef.current ? { ...s, level: 0, profanity: false } : s;
+  }, []);
 
   /* ---------- Speech + captions ---------- */
   const speak = useCallback((text, opts) => {
@@ -134,6 +166,28 @@ export default function App() {
     return () => document.removeEventListener('visibilitychange', fn);
   }, [phase, acquireWake]);
 
+  /* ---------- Hazards ---------- */
+  const refreshHazards = useCallback(async (r) => {
+    const s = settingsRef.current;
+    if (!r || (!s.tomtomKey && !s.cameras)) {
+      setHazards([]);
+      engineRef.current?.setHazards([]);
+      return;
+    }
+    hazardCtrl.current?.abort();
+    const ctrl = new AbortController();
+    hazardCtrl.current = ctrl;
+    try {
+      const { hazards: list, errors } = await loadHazards(r, { tomtomKey: s.tomtomKey, cameras: s.cameras }, ctrl.signal);
+      if (ctrl.signal.aborted || routeRef.current !== r) return;
+      setHazards(list);
+      engineRef.current?.setHazards(list);
+      if (errors.length) setToast(errors[0]);
+    } catch {
+      /* network hiccup: keep the old list */
+    }
+  }, []);
+
   /* ---------- Planning ---------- */
   const startPoint = gps?.coords || manualStart;
 
@@ -154,9 +208,12 @@ export default function App() {
       try {
         const r = await fetchRoute(from, place.coords, ctrl.signal);
         setRoute(r);
+        routeRef.current = r;
+        refreshHazards(r);
         const s = settingsRef.current;
+        const respect = RESPECT_CATEGORIES.has(place.category);
         setPreviewQuip(
-          s.level === 0 ? '' : pick('preview', s.level, s.profanity, { eta: spokenDuration(r.duration), dist: spokenDistance(r.distance, s.units) }),
+          s.level === 0 || respect ? '' : pick('preview', s.level, s.profanity, { eta: spokenDuration(r.duration), dist: spokenDistance(r.distance, s.units) }),
         );
       } catch (e) {
         if (e.name === 'AbortError') return;
@@ -166,7 +223,7 @@ export default function App() {
         if (planCtrl.current === ctrl) setLoading(false);
       }
     },
-    [gps, manualStart],
+    [gps, manualStart, refreshHazards],
   );
 
   const onMapClick = useCallback(
@@ -177,7 +234,7 @@ export default function App() {
         setToast('Start set. Now search or tap the map for a destination.');
         return;
       }
-      plan({ id: `pin-${coords.join()}`, name: 'Dropped pin', label: `${coords[1].toFixed(5)}, ${coords[0].toFixed(5)}`, coords });
+      plan({ id: `pin-${coords.join()}`, name: 'Dropped pin', label: `${coords[1].toFixed(5)}, ${coords[0].toFixed(5)}`, coords, category: 'pin' });
     },
     [phase, gps, manualStart, plan],
   );
@@ -189,6 +246,8 @@ export default function App() {
     setPhase('browse');
     setPreviewQuip('');
     setLoading(false);
+    hazardCtrl.current?.abort();
+    setHazards([]);
   }, []);
 
   /* ---------- Navigation ---------- */
@@ -197,6 +256,9 @@ export default function App() {
     simRef.current = null;
     clearInterval(tickRef.current);
     tickRef.current = null;
+    clearInterval(hazardTimer.current);
+    hazardTimer.current = null;
+    listenerRef.current?.stop();
     releaseWake();
   }, [releaseWake]);
 
@@ -207,13 +269,15 @@ export default function App() {
       const r = await fetchRoute(from, d.coords);
       if (!engineRef.current) return;
       setRoute(r);
+      routeRef.current = r;
       engineRef.current.setRoute(r, true);
       simRef.current?.setRoute(r, from);
+      refreshHazards(r);
     } catch {
       engineRef.current?.rerouteFailed();
       setToast("Couldn't reroute. I'll try again in a few seconds.");
     }
-  }, []);
+  }, [refreshHazards]);
 
   const handleArrive = useCallback(() => {
     stopRunning();
@@ -228,8 +292,14 @@ export default function App() {
       const eng = new NavEngine({
         route,
         destName,
-        getSettings: () => settingsRef.current,
+        destCategory: dest.category || 'other',
+        getSettings: engineSettings,
         say: speak,
+        prefetch: (t) => voice.prefetch(t),
+        onLevel: (lvl) => {
+          update({ level: lvl });
+          setToast(`Rudeness: ${LEVELS[lvl].name}`);
+        },
         onState: setNav,
         onReroute: handleReroute,
         onArrive: handleArrive,
@@ -241,13 +311,19 @@ export default function App() {
       setNav(null);
       setFollow(true);
       setPhase('nav');
+      eng.setHazards(hazards);
       eng.start();
+      if (respectRef.current) setToast('No jokes on this trip. Drive safe.');
+      if (settingsRef.current.tomtomKey) {
+        hazardTimer.current = setInterval(() => refreshHazards(routeRef.current), 5 * 60 * 1000);
+      }
       if (isDemo) {
         const sim = new Simulator((pos) => {
           setSimPos(pos);
           engineRef.current?.update(pos);
         });
         simRef.current = sim;
+        sim.setMode(demoMode);
         sim.start(route, settingsRef.current.demoMult);
       } else if (gps) {
         eng.update(gps);
@@ -255,8 +331,25 @@ export default function App() {
       tickRef.current = setInterval(() => engineRef.current?.tick(), 1000);
       acquireWake();
     },
-    [route, dest, gps, speak, handleReroute, handleArrive, acquireWake],
+    [route, dest, gps, speak, handleReroute, handleArrive, acquireWake, engineSettings, hazards, refreshHazards, update, demoMode],
   );
+
+  const toggleMic = useCallback(() => {
+    if (listenerRef.current?.on) {
+      listenerRef.current.stop();
+      return;
+    }
+    voice.unlock();
+    listenerRef.current = new Listener({
+      onCommand: (cmd) => engineRef.current?.command(cmd),
+      onState: (st) => {
+        setListen(st);
+        if (st === 'denied') setToast('Microphone is blocked. Allow it in your browser settings to talk back.');
+      },
+      isSpeaking: () => voice.speaking,
+    });
+    listenerRef.current.start();
+  }, []);
 
   const endNav = useCallback(() => {
     engineRef.current?.cancel();
@@ -310,6 +403,7 @@ export default function App() {
         route={route}
         traveled={traveled}
         destination={dest}
+        hazards={phase === 'nav' || phase === 'preview' ? hazards : []}
         manualStart={gps ? null : manualStart}
         mode={phase === 'arrived' ? 'nav' : phase}
         follow={follow}
@@ -332,7 +426,15 @@ export default function App() {
         </div>
       )}
 
-      {phase === 'nav' && <div className="top"><NavBanner nav={nav} units={settings.units} /></div>}
+      {phase === 'nav' && (
+        <div className="top">
+          <NavBanner nav={nav} units={settings.units} />
+          <div className="top-row">
+            <SpeedSign nav={nav} units={settings.units} />
+            <HazardChip hazard={nav?.hazardAhead} units={settings.units} />
+          </div>
+        </div>
+      )}
 
       {caption && (phase === 'nav' || phase === 'arrived') && (
         <div key={caption.id} className="caption" data-level={settings.level}>
@@ -368,6 +470,12 @@ export default function App() {
                 <button className="chip level-chip" onClick={() => setShowSettings(true)}>{LEVELS[settings.level].name}</button>
               </div>
               {previewQuip && <p className="quip">“{previewQuip}”</p>}
+              {respectful && <p className="quip">No jokes on this trip. Just directions.</p>}
+              {hazards.length > 0 && (
+                <p className="sub hazard-count">
+                  {hazards.length} {hazards.length === 1 ? 'alert' : 'alerts'} on this route
+                </p>
+              )}
               <div className="actions">
                 <button className="btn primary" onClick={() => startNav(false)} disabled={!gps}>
                   {gps ? "Let's go" : 'Needs live GPS'}
@@ -389,6 +497,14 @@ export default function App() {
           onMute={() => update({ muted: !settings.muted })}
           onEnd={endNav}
           onMissTurn={() => simRef.current?.missTurn()}
+          demoMode={demoMode}
+          onDemoMode={(m) => {
+            setDemoMode(m);
+            simRef.current?.setMode(m);
+          }}
+          listen={listen}
+          onMic={toggleMic}
+          micSupported={listenSupported}
           onDemoSpeed={(m) => {
             update({ demoMult: m });
             simRef.current?.setMultiplier(m);

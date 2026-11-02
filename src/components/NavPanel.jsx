@@ -1,4 +1,5 @@
 import { instruction, cap, displayDistance, displayDuration, LEVELS } from '../lib/lines.js';
+import { hazardSvg, HAZARD_STYLE } from '../lib/hazardIcons.js';
 
 const ANGLE = { straight: 0, 'slight right': 45, right: 90, 'sharp right': 135, 'slight left': -45, left: -90, 'sharp left': -135 };
 
@@ -30,6 +31,40 @@ export function ManeuverIcon({ step, size = 56 }) {
   );
 }
 
+export function HazardChip({ hazard, units }) {
+  if (!hazard) return null;
+  const st = HAZARD_STYLE[hazard.kind] || HAZARD_STYLE.hazard;
+  return (
+    <div className="hazard-chip" style={{ '--hz': st.color }}>
+      <span className="hazard-dot" dangerouslySetInnerHTML={{ __html: hazardSvg(hazard.kind, 16) }} />
+      <strong>{st.label}</strong>
+      <span>{displayDistance(hazard.dist, units)}</span>
+    </div>
+  );
+}
+
+export function SpeedSign({ nav, units }) {
+  if (!nav) return null;
+  const conv = units === 'metric' ? 3.6 : 2.23694;
+  const sp = Math.round((nav.speed || 0) * conv);
+  const lim = nav.limit ? Math.round((nav.limit * conv) / 5) * 5 : null;
+  const over = lim && sp > lim + Math.max(units === 'metric' ? 15 : 9, lim * 0.15);
+  return (
+    <div className="speed">
+      <div className={`speed-now ${over ? 'over' : ''}`}>
+        <b>{sp}</b>
+        <span>{units === 'metric' ? 'km/h' : 'mph'}</span>
+      </div>
+      {lim && (
+        <div className="speed-limit" aria-label={`Speed limit ${lim}`}>
+          <span>LIMIT</span>
+          <b>{lim}</b>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function NavBanner({ nav, units }) {
   if (!nav) return null;
   return (
@@ -44,7 +79,7 @@ export function NavBanner({ nav, units }) {
   );
 }
 
-export function NavFooter({ nav, units, settings, onLevel, onMute, onEnd, demo, onMissTurn, onDemoSpeed }) {
+export function NavFooter({ nav, units, settings, onLevel, onMute, onEnd, demo, onMissTurn, onDemoSpeed, demoMode, onDemoMode, listen, onMic, micSupported }) {
   const eta = nav?.eta?.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
   return (
     <div className="footer">
@@ -52,6 +87,8 @@ export function NavFooter({ nav, units, settings, onLevel, onMute, onEnd, demo, 
         <div className="demo-row">
           <span className="demo-tag">DEMO</span>
           <button className="chip" onClick={onMissTurn}>Miss a turn</button>
+          <button className={`chip ${demoMode === 'fast' ? 'on' : ''}`} onClick={() => onDemoMode(demoMode === 'fast' ? 'normal' : 'fast')}>Floor it</button>
+          <button className={`chip ${demoMode === 'slow' ? 'on' : ''}`} onClick={() => onDemoMode(demoMode === 'slow' ? 'normal' : 'slow')}>Grandma</button>
           {[1, 2, 4].map((m) => (
             <button key={m} className={`chip ${settings.demoMult === m ? 'on' : ''}`} onClick={() => onDemoSpeed(m)}>{m}×</button>
           ))}
@@ -65,8 +102,13 @@ export function NavFooter({ nav, units, settings, onLevel, onMute, onEnd, demo, 
           </div>
         </div>
         <button className="chip level-chip" onClick={onLevel} aria-label="Change rudeness">
-          {LEVELS[settings.level].name}
+          {nav?.quiet ? 'Quiet' : LEVELS[settings.level].name}
         </button>
+        {micSupported && (
+          <button className={`icon-btn mic ${listen === 'listening' ? 'live' : ''}`} onClick={onMic} aria-label={listen === 'listening' ? 'Stop listening' : 'Talk back to the GPS'}>
+            <svg viewBox="0 0 24 24" width="22" height="22"><rect x="9" y="3" width="6" height="11" rx="3" /><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21" />{listen !== 'listening' && <path d="M4 4l16 16" className="mic-off" />}</svg>
+          </button>
+        )}
         <button className={`icon-btn ${settings.muted ? 'muted' : ''}`} onClick={onMute} aria-label={settings.muted ? 'Unmute' : 'Mute'}>
           {settings.muted ? (
             <svg viewBox="0 0 24 24" width="22" height="22"><path d="M4 9h4l5-4v14l-5-4H4zM17 9l5 6M22 9l-5 6" /></svg>

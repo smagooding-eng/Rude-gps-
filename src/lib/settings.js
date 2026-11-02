@@ -12,6 +12,11 @@ export const DEFAULTS = {
   mapTheme: 'auto',
   muted: false,
   demoMult: 1,
+  voiceEngine: 'device', // device | ai
+  aiKey: '',
+  aiVoice: 'ash',
+  tomtomKey: '',
+  cameras: true,
 };
 
 export function load(key, fallback) {

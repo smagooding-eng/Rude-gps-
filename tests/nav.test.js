@@ -109,8 +109,9 @@ test('full drive announces every maneuver in order and arrives', () => {
 
 test('savage level keeps the instruction first, then the roast', () => {
   const { said } = drive({ level: 3 });
-  const s = said.find((x) => x.startsWith('In ') && x.includes('North Oak'));
-  assert.match(s, /^In [\w ]+, turn left onto North Oak Avenue\. .+/);
+  const i = said.findIndex((x) => x.startsWith('In ') && x.includes('North Oak'));
+  assert.match(said[i], /^In [\w ]+, turn left onto North Oak Avenue\.$/);
+  assert.ok(said[i + 1] && !said[i + 1].startsWith('Turn'), 'roast follows the instruction as its own line');
 });
 
 test('missing a turn triggers a reroute roast', () => {

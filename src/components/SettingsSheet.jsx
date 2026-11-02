@@ -1,18 +1,35 @@
 import { useEffect, useState } from 'react';
 import { LEVELS, pick } from '../lib/lines.js';
-import { voice } from '../lib/voice.js';
+import { voice, AI_VOICES, synthesize } from '../lib/voice.js';
+import { MAP_THEMES } from '../lib/mapTheme.js';
+import { listenSupported } from '../lib/listener.js';
 
 export default function SettingsSheet({ settings, update, onClose }) {
   const [voices, setVoices] = useState(voice.list());
+  const [aiStatus, setAiStatus] = useState('');
   useEffect(() => voice.onVoicesChanged(() => setVoices(voice.list())), []);
+  const best = voice.best();
 
-  const test = () => {
-    voice.unlock();
+  const sample = () => {
     const lvl = settings.level;
-    const line = lvl === 0
+    return lvl === 0
       ? 'In 500 feet, turn left onto Main Street.'
       : `In 500 feet, turn left onto Main Street. ${pick('prepareQuip', lvl, settings.profanity) || ''}`;
-    voice.speak(line, { interrupt: true });
+  };
+
+  const test = async () => {
+    voice.unlock();
+    if (settings.voiceEngine === 'ai' && settings.aiKey) {
+      setAiStatus('Generating…');
+      try {
+        await synthesize('Testing.', { key: settings.aiKey, voice: settings.aiVoice, level: settings.level });
+        setAiStatus('Key works.');
+      } catch (e) {
+        setAiStatus(e.message);
+        return;
+      }
+    }
+    voice.speak(sample(), { interrupt: true });
   };
 
   return (
@@ -58,22 +75,100 @@ export default function SettingsSheet({ settings, update, onClose }) {
         </section>
 
         <section>
-          <label className="label" htmlFor="voice">Voice</label>
-          <select id="voice" value={settings.voiceURI} onChange={(e) => update({ voiceURI: e.target.value })}>
-            <option value="">Device default</option>
-            {voices.map((v) => (
-              <option key={v.voiceURI} value={v.voiceURI}>{v.name} ({v.lang})</option>
-            ))}
-          </select>
+          <label className="label">Voice</label>
+          <div className="seg">
+            <button className={settings.voiceEngine !== 'ai' ? 'on' : ''} onClick={() => update({ voiceEngine: 'device' })}>Phone voice (free)</button>
+            <button className={settings.voiceEngine === 'ai' ? 'on' : ''} onClick={() => update({ voiceEngine: 'ai' })}>AI actor</button>
+          </div>
+
+          {settings.voiceEngine !== 'ai' ? (
+            <>
+              <select id="voice" value={settings.voiceURI} onChange={(e) => update({ voiceURI: e.target.value })} className="mt">
+                <option value="">Best available{best ? ` (${best.name})` : ''}</option>
+                {voices.map((v) => (
+                  <option key={v.voiceURI} value={v.voiceURI}>{v.name} ({v.lang})</option>
+                ))}
+              </select>
+              <p className="hint">
+                iPhone tip: Settings → Accessibility → Spoken Content → Voices → English, then download an
+                &ldquo;Enhanced&rdquo; or &ldquo;Premium&rdquo; voice. It shows up here and sounds far better.
+              </p>
+            </>
+          ) : (
+            <>
+              <p className="hint">
+                Uses OpenAI&rsquo;s text-to-speech with acting directions that match the rudeness level. Paste your own
+                API key from platform.openai.com. It stays on this phone only. Costs a few cents per long drive.
+                If a clip is slow or there&rsquo;s no signal, the phone voice covers so you never miss a turn.
+              </p>
+              <input
+                id="aiKey"
+                className="text-in"
+                type="password"
+                autoComplete="off"
+                placeholder="sk-…"
+                value={settings.aiKey}
+                onChange={(e) => update({ aiKey: e.target.value.trim() })}
+                aria-label="OpenAI API key"
+              />
+              <label className="label mt" htmlFor="aiVoice">AI voice</label>
+              <select id="aiVoice" value={settings.aiVoice} onChange={(e) => update({ aiVoice: e.target.value })}>
+                {AI_VOICES.map((v) => (
+                  <option key={v} value={v}>{v[0].toUpperCase() + v.slice(1)}</option>
+                ))}
+              </select>
+              {aiStatus && <p className="hint">{aiStatus}</p>}
+            </>
+          )}
+
           <div className="row tight">
             <label className="label" htmlFor="rate">Speed</label>
             <input id="rate" type="range" min="0.7" max="1.4" step="0.05" value={settings.rate} onChange={(e) => update({ rate: Number(e.target.value) })} />
             <span className="val">{settings.rate.toFixed(2)}×</span>
           </div>
-          <button className="btn secondary wide" onClick={test} disabled={!voice.supported}>
-            {voice.supported ? 'Test the attitude' : 'Speech not supported in this browser'}
+          <button className="btn secondary wide" onClick={test} disabled={!voice.supported && settings.voiceEngine !== 'ai'}>
+            Test the attitude
           </button>
         </section>
+
+        <section>
+          <label className="label">Hazard alerts</label>
+          <div className="row">
+            <div>
+              <div className="sub-strong">Speed &amp; red-light cameras</div>
+              <p className="hint">From OpenStreetMap. Free, no setup.</p>
+            </div>
+            <button className={`toggle ${settings.cameras ? 'on' : ''}`} role="switch" aria-checked={settings.cameras} onClick={() => update({ cameras: !settings.cameras })}>
+              <span />
+            </button>
+          </div>
+          <div className="sub-strong mt">Crashes, closures, road work, hazards, traffic</div>
+          <p className="hint">
+            Live from TomTom Traffic. Get a free key at developer.tomtom.com (no credit card, 2,500 lookups a month,
+            roughly one per 5 minutes of driving) and paste it here.
+          </p>
+          <input
+            id="tomtomKey"
+            className="text-in"
+            type="password"
+            autoComplete="off"
+            placeholder="TomTom API key"
+            value={settings.tomtomKey}
+            onChange={(e) => update({ tomtomKey: e.target.value.trim() })}
+            aria-label="TomTom API key"
+          />
+        </section>
+
+        {listenSupported && (
+          <section>
+            <label className="label">Talk back</label>
+            <p className="hint">
+              Tap the mic while driving, then say things like &ldquo;shut up&rdquo;, &ldquo;talk to me&rdquo;,
+              &ldquo;repeat that&rdquo;, &ldquo;are we there yet&rdquo;, &ldquo;be nicer&rdquo; or &ldquo;roast me&rdquo;.
+              It only reacts to those, so normal conversation in the car is ignored.
+            </p>
+          </section>
+        )}
 
         <section>
           <label className="label">Units</label>
@@ -85,15 +180,16 @@ export default function SettingsSheet({ settings, update, onClose }) {
 
         <section>
           <label className="label">Map</label>
-          <div className="seg">
-            {['auto', 'light', 'dark'].map((t) => (
-              <button key={t} className={settings.mapTheme === t ? 'on' : ''} onClick={() => update({ mapTheme: t })}>{t[0].toUpperCase() + t.slice(1)}</button>
+          <div className="seg wrap">
+            {MAP_THEMES.map((t) => (
+              <button key={t.id} className={settings.mapTheme === t.id ? 'on' : ''} onClick={() => update({ mapTheme: t.id })}>{t.name}</button>
             ))}
           </div>
         </section>
 
         <p className="fine">
           Map data © OpenStreetMap contributors. Tiles by OpenFreeMap. Routing by OSRM. Search by Photon.
+          Incidents by TomTom. Speed limits and cameras from OpenStreetMap and can be missing or out of date.
           Directions can be wrong. Road signs win every argument.
         </p>
       </div>

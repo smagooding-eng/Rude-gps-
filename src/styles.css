@@ -165,3 +165,44 @@ select { width: 100%; padding: 12px; border-radius: 12px; background: var(--asph
 
 /* Light map: keep UI dark, just soften the hint pill. */
 .theme-light .hint-pill { background: rgba(17,18,20,.85); }
+
+/* ---------- v2: markers, speed, hazards, mic ---------- */
+.dest-marker svg path:first-child { fill: var(--hot); stroke: #111; stroke-width: 2.5; }
+.dest-marker svg .flag { fill: none; stroke: #fff; stroke-width: 2.6; stroke-linecap: round; stroke-linejoin: round; }
+.dest-marker svg { filter: drop-shadow(0 3px 6px rgba(0,0,0,.45)); }
+
+.hazard-marker { width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; background: var(--hz, #ffb020); border: 2.5px solid #111; box-shadow: 0 2px 8px rgba(0,0,0,.45); }
+.hazard-marker svg { display: block; }
+
+.top-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.speed { display: flex; gap: 6px; align-items: stretch; }
+.speed-now { background: var(--asphalt); border: 1px solid var(--line); border-radius: 14px; padding: 6px 10px; display: flex; flex-direction: column; align-items: center; justify-content: center; min-width: 62px; box-shadow: var(--shadow); }
+.speed-now b { font-size: 24px; font-weight: 900; line-height: 1; font-variant-numeric: tabular-nums; }
+.speed-now span { font-size: 10px; font-weight: 800; color: var(--muted); letter-spacing: .06em; }
+.speed-now.over { background: var(--hot); border-color: var(--hot); }
+.speed-now.over span { color: #fff; }
+.speed-limit { background: #fff; color: #111; border: 3px solid #111; border-radius: 10px; padding: 4px 8px; display: flex; flex-direction: column; align-items: center; justify-content: center; min-width: 52px; box-shadow: var(--shadow); }
+.speed-limit span { font-size: 9px; font-weight: 900; letter-spacing: .08em; }
+.speed-limit b { font-size: 22px; font-weight: 900; line-height: 1; font-variant-numeric: tabular-nums; }
+
+.hazard-chip { display: flex; align-items: center; gap: 8px; background: var(--asphalt); border: 1px solid var(--hz); border-radius: 999px; padding: 6px 12px 6px 6px; box-shadow: var(--shadow); font-size: 14px; min-width: 0; animation: rise .25s ease-out; }
+.hazard-chip strong { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hazard-chip span:last-child { color: var(--muted); font-weight: 700; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.hazard-dot { width: 26px; height: 26px; border-radius: 50%; background: var(--hz); display: grid; place-items: center; flex: none; }
+
+.caption { top: calc(var(--safe-top) + 215px); }
+
+.icon-btn.mic.live { background: var(--hot); color: #fff; animation: micpulse 1.6s ease-in-out infinite; }
+@keyframes micpulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(255,59,92,.5); } 50% { box-shadow: 0 0 0 8px rgba(255,59,92,0); } }
+
+.text-in { width: 100%; padding: 12px; border-radius: 12px; background: var(--asphalt-2); border: 1px solid var(--line); margin-top: 10px; font-size: 16px; }
+.text-in:focus, select:focus { outline: 2px solid var(--caution); outline-offset: 1px; }
+.mt { margin-top: 12px; }
+.sub-strong { font-weight: 700; font-size: 15px; }
+.seg.wrap { flex-wrap: wrap; }
+.seg.wrap button { flex: 1 1 30%; }
+.hazard-count { color: #ffb020; font-weight: 700; margin-top: 8px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .user-pulse, .icon-btn.mic.live { animation: none; }
+}

@@ -22,6 +22,30 @@ export async function searchPlaces(q, near, signal) {
       name,
       label: parts.join(', '),
       coords: f.geometry.coordinates,
+      category: categorize(p),
     };
   });
+}
+
+// Rough destination category from OpenStreetMap tags, for destination-specific jokes.
+const BY_VALUE = {
+  fast_food: 'fastfood', cafe: 'coffee', bar: 'bar', pub: 'bar', nightclub: 'bar', biergarten: 'bar',
+  restaurant: 'restaurant', fitness_centre: 'gym', sports_centre: 'gym',
+  supermarket: 'superstore', department_store: 'superstore', wholesale: 'superstore', mall: 'mall',
+  fuel: 'gas', car_wash: 'carwash', bank: 'bank', atm: 'bank', townhall: 'government', courthouse: 'government',
+  hospital: 'medical', clinic: 'medical', doctors: 'medical', dentist: 'medical', pharmacy: 'medical', chemist: 'medical',
+  place_of_worship: 'worship', grave_yard: 'respect', cemetery: 'respect', funeral_hall: 'respect', funeral_directors: 'respect',
+  school: 'school', university: 'school', college: 'school', aerodrome: 'airport', terminal: 'airport',
+  casino: 'casino', alcohol: 'liquor', beach: 'beach', park: 'park', hotel: 'hotel', motel: 'hotel',
+  cinema: 'movies', library: 'library', zoo: 'zoo', car: 'dealership', hairdresser: 'haircut', police: 'police',
+};
+
+export function categorize(p) {
+  if (p.osm_key === 'office' && p.osm_value === 'government') return 'government';
+  if (p.osm_key === 'office') return 'work';
+  if (p.osm_key === 'emergency') return 'medical';
+  const name = (p.name || '').toLowerCase();
+  if (/\b(dmv|motor vehicle|secretary of state)\b/.test(name)) return 'government';
+  if (/\b(emergency room|urgent care|hospital)\b/.test(name)) return 'medical';
+  return BY_VALUE[p.osm_value] || (p.osm_key === 'place' || p.osm_key === 'highway' || p.osm_key === 'building' ? 'address' : 'other');
 }

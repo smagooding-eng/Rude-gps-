@@ -1,4 +1,4 @@
-import { nearestOnRoute, pointAlong, offset } from './geo.js';
+import { nearestOnRoute, pointAlong, offset, segmentAt } from './geo.js';
 
 // Fake "drive" along a route so you can test from the couch.
 export class Simulator {
@@ -6,7 +6,20 @@ export class Simulator {
     this.onPosition = onPosition;
     this.onDone = onDone;
     this.timer = null;
-    this.mult = 1;
+    this.mult = 1; // time warp: covers ground faster, reported speed unchanged
+    this.mode = 'normal'; // normal | fast | slow (demo speeding / crawling)
+  }
+
+  setMode(mode) {
+    this.mode = mode;
+  }
+
+  // Simulated driving speed (m/s): the posted limit when known, else route average.
+  _speed() {
+    const lim = this.route.maxspeed?.[segmentAt(this.route.cum, this.d)];
+    const base = lim || this.speed;
+    const f = this.mode === 'fast' ? 1.45 : this.mode === 'slow' ? 0.45 : 0.97;
+    return base * f;
   }
 
   start(route, mult = 1) {
@@ -38,7 +51,9 @@ export class Simulator {
   }
 
   _step() {
-    const move = this.speed * this.mult;
+    const v = this._speed();
+    this.curSpeed = v;
+    const move = v * this.mult;
     if (this.detour) {
       this.detour.pos = offset(this.detour.pos, this.detour.bearing, move);
       this._emit({ coords: this.detour.pos, bearing: this.detour.bearing });
@@ -53,7 +68,7 @@ export class Simulator {
   }
 
   _emit(p) {
-    this.last = { coords: p.coords, heading: p.bearing, speed: this.speed * this.mult, accuracy: 5, timestamp: Date.now() };
+    this.last = { coords: p.coords, heading: p.bearing, speed: this.curSpeed ?? this.speed, accuracy: 5, timestamp: Date.now() };
     this.onPosition(this.last);
   }
 

@@ -1,5 +1,5 @@
-import { nearestOnRoute } from './geo.js';
-import { pick, instruction, cap, spokenDistance, spokenDuration, roadLabel, QUIP_CHANCE } from './lines.js';
+import { nearestOnRoute, segmentAt } from './geo.js';
+import { pick, instruction, cap, spokenDistance, spokenDuration, roadLabel, QUIP_CHANCE, hazardSentence, hazardQuip, speedSentence, LEVELS } from './lines.js';
 
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 const TURNISH = new Set(['turn', 'end of road', 'continue', 'fork', 'off ramp', 'on ramp', 'merge', 'roundabout turn']);
@@ -9,8 +9,13 @@ const TURNISH = new Set(['turn', 'end of road', 'continue', 'fork', 'off ramp', 
  * second, and it decides what to say and when.
  */
 export class NavEngine {
-  constructor({ route, destName, getSettings, say, onState, onReroute, onArrive, simulated = false, now = () => Date.now(), random = Math.random }) {
-    Object.assign(this, { destName, getSettings, sayFn: say, onState, onReroute, onArrive, simulated, now, random });
+  constructor({ route, destName, destCategory = 'other', getSettings, say, prefetch, onState, onReroute, onArrive, onLevel, simulated = false, now = () => Date.now(), random = Math.random }) {
+    Object.assign(this, { destName, destCategory, getSettings, sayFn: say, prefetchFn: prefetch, onState, onReroute, onArrive, onLevel, simulated, now, random });
+    this.quiet = false;
+    this.lastInstruction = '';
+    this.passedHazards = new Set();
+    this.speedState = { overSince: null, underSince: null, lastOver: -Infinity, lastUnder: -Infinity };
+    this.startedAt = now();
     this.speed = 0;
     this.lastSpeechAt = 0;
     this.lastFix = 0;
@@ -18,6 +23,8 @@ export class NavEngine {
     this.lastSpeedWarn = -Infinity;
     this.arrived = false;
     this.cancelled = false;
+    this.hazards = [];
+    this.warnedHazards = new Set();
     this._load(route);
     this._scheduleIdle();
   }
@@ -38,7 +45,9 @@ export class NavEngine {
 
   _s() {
     const s = this.getSettings();
-    return { level: s.level, prof: !!s.profanity, units: s.units, chat: s.chattiness };
+    // "Shut up" mode: directions only.
+    if (this.quiet) return { level: 0, prof: false, units: s.units, chat: 0, realLevel: s.level };
+    return { level: s.level, prof: !!s.profanity, units: s.units, chat: s.chattiness, realLevel: s.level };
   }
 
   _say(text, opts) {
@@ -59,6 +68,17 @@ export class NavEngine {
     return pick(`${kind}Quip`, level, prof);
   }
 
+  _destLine(kind) {
+    const { level, prof } = this._s();
+    if (level === 0) return '';
+    return pick(`${kind}_${this.destCategory}`, level, prof, { dest: this.destName });
+  }
+
+  _instr(text, opts) {
+    this.lastInstruction = text;
+    this._say(text, opts);
+  }
+
   _scheduleIdle() {
     const { chat } = this._s();
     const [lo, hi] = chat >= 2 ? [75, 150] : [180, 300];
@@ -68,7 +88,9 @@ export class NavEngine {
   start() {
     const r = this.route;
     this._say(this._line('start', { dest: this.destName, eta: spokenDuration(r.duration) }));
-    if (r.steps[0]) this._say(`${cap(instruction(r.steps[0]))}.`);
+    const dj = this._destLine('dest');
+    if (dj) this._say(dj);
+    if (r.steps[0]) this._instr(`${cap(instruction(r.steps[0]))}.`);
     this.lastFix = this.now();
   }
 
@@ -76,8 +98,132 @@ export class NavEngine {
     this._load(route);
     if (rerouted) {
       this._say(this._line('reroute'), { interrupt: true });
-      if (route.steps[0]) this._say(`${cap(instruction(route.steps[0]))}.`);
+      if (route.steps[0]) this._instr(`${cap(instruction(route.steps[0]))}.`);
       this.flags.early = false;
+    }
+  }
+
+  // Hazards must already be projected onto the current route (have .along).
+  setHazards(list) {
+    this.hazards = list || [];
+  }
+
+  _checkHazards(units, level, prof) {
+    for (const h of this.hazards) {
+      if (this.warnedHazards.has(h.id)) continue;
+      const d = h.along - this.progress;
+      if (d < 0) continue;
+      const isCam = h.kind === 'camera' || h.kind === 'redlight';
+      const warn = isCam ? clamp(this.speed * 25, 300, 1000) : clamp(this.speed * 35, 400, 1600);
+      if (d > warn) break; // sorted by along: nothing closer remains
+      this.warnedHazards.add(h.id);
+      if (d < 40) continue; // too late to be useful
+      if (level === 0 && h.kind === 'jam') continue;
+      const chance = QUIP_CHANCE.hazard[level] || 0;
+      const q = this.random() < chance ? hazardQuip(h.kind, level, prof) : '';
+      this._say(`${hazardSentence(h, spokenDistance(d, units))}${q ? ` ${q}` : ''}`);
+      return; // one per update
+    }
+    // A parting shot once a camera or crash is behind us.
+    if (level >= 2) {
+      for (const h of this.hazards) {
+        if (h.along > this.progress) break;
+        if (this.passedHazards.has(h.id) || !this.warnedHazards.has(h.id) || this.progress - h.along < 120) continue;
+        this.passedHazards.add(h.id);
+        if (this.progress - h.along > 600 || this.random() > 0.6) continue;
+        const pool = h.kind === 'camera' || h.kind === 'redlight' ? 'hazardPassed_camera' : 'hazardPassed';
+        const line = pick(pool, level, prof);
+        if (line) this._say(line);
+        return;
+      }
+    }
+  }
+
+  // Posted limit at the current position (m/s) or null.
+  limitAt(progress = this.progress) {
+    const ms = this.route.maxspeed;
+    if (!ms) return null;
+    return ms[segmentAt(this.route.cum, progress)] ?? null;
+  }
+
+  _checkSpeed(t) {
+    const { level, prof, units } = this._s();
+    const lim = this.limitAt();
+    const st = this.speedState;
+    if (!lim) {
+      // No posted limit known: keep the old 80 mph / 129 km/h nag (real GPS only).
+      if (!this.simulated && this.speed > 35.8 && t - this.lastSpeedWarn > 180000) {
+        this.lastSpeedWarn = t;
+        this._say(this._line('speeding'));
+      }
+      st.overSince = st.underSince = null;
+      return;
+    }
+    const over = this.speed - lim > Math.max(4, lim * 0.15);
+    const under = lim >= 11 && this.speed > 1.5 && lim - this.speed > Math.max(5.4, lim * 0.35);
+    st.overSince = over ? st.overSince ?? t : null;
+    st.underSince = under ? st.underSince ?? t : null;
+
+    if (over && t - st.overSince > 6000 && t - st.lastOver > 60000) {
+      st.lastOver = t;
+      const q = level >= 1 ? pick('overQuip', level, prof) : '';
+      this._say(`${speedSentence(this.speed, lim, units)}${q ? ` ${q}` : ''}`);
+      return;
+    }
+    const busy = (this._distToNext ?? Infinity) < 300 || t - this.startedAt < 30000 ||
+      this.hazards.some((h) => h.kind === 'jam' && h.along > this.progress && h.along - this.progress < 1500);
+    if (under && level >= 1 && !busy && t - st.underSince > 12000 && t - st.lastUnder > 90000) {
+      st.lastUnder = t;
+      this._say(`${speedSentence(this.speed, lim, units)} ${pick('underQuip', level, prof)}`);
+    }
+  }
+
+  // Voice commands from the listener.
+  command(name) {
+    const s = this.getSettings();
+    const level = s.level;
+    const prof = !!s.profanity;
+    const say = (pool, lvl = level) => this._say(pick(pool, lvl, prof) || pick(pool, 2, false), { interrupt: true });
+    switch (name) {
+      case 'quiet':
+        say('cmd_quiet');
+        this.quiet = true;
+        break;
+      case 'talk':
+        this.quiet = false;
+        say('cmd_talk');
+        break;
+      case 'nicer': {
+        const next = Math.max(0, level - 1);
+        this.quiet = false;
+        say('cmd_nicer', Math.max(1, level));
+        this.onLevel?.(next);
+        break;
+      }
+      case 'meaner': {
+        const next = Math.min(LEVELS.length - 1, level + 1);
+        this.quiet = false;
+        this.onLevel?.(next);
+        say('cmd_meaner', next);
+        break;
+      }
+      case 'repeat':
+        if (this.lastInstruction) this._say(this.lastInstruction, { interrupt: true });
+        break;
+      case 'eta': {
+        const rem = Math.max(0, this.total - this.progress);
+        const tt = this.route.duration * (rem / (this.total || 1));
+        const base = `About ${spokenDuration(tt)} left. ${spokenDistance(rem, s.units)} to go.`;
+        const q = !this.quiet && level >= 2 ? (level >= 3 ? ' Stop asking.' : ' Patience.') : '';
+        this._say(`${level >= 1 && !this.quiet ? 'No. ' : ''}${base}${q}`, { interrupt: true });
+        break;
+      }
+      case 'lost':
+        say('cmd_lost', this.quiet ? 0 : level);
+        if (this.lastInstruction) this._say(this.lastInstruction);
+        break;
+      default:
+        say(`cmd_${name}`, this.quiet ? 0 : level);
     }
   }
 
@@ -122,7 +268,8 @@ export class NavEngine {
 
     if (remaining < 25) {
       this.arrived = true;
-      this._say(this._line('arrive', { dest: this.destName }), { interrupt: true });
+      const da = this.random() < 0.7 ? this._destLine('destArrive') : '';
+      this._say(da || this._line('arrive', { dest: this.destName }), { interrupt: true });
       this._emit(near, remaining);
       this.onArrive?.();
       return;
@@ -147,33 +294,39 @@ export class NavEngine {
         const prev = steps[this.nextIdx - 1];
         const road = prev && (prev.name || prev.ref) ? ` on ${prev.name || prev.ref}` : '';
         const q = this._quip('continue');
-        this._say(`Continue${road} for ${spokenDistance(d, units)}.${q ? ` ${q}` : ''}`);
+        this._instr(`Continue${road} for ${spokenDistance(d, units)}.`);
+        if (q) this._say(q);
       }
     }
 
     if (!this.flags.prepare && d <= prepareDist && d > nowDist + 20) {
       this.flags.prepare = true;
       const q = step.type === 'arrive' ? '' : this._quip('prepare');
-      this._say(`In ${spokenDistance(d, units)}, ${instruction(step)}.${then}${q ? ` ${q}` : ''}`);
+      this._instr(`In ${spokenDistance(d, units)}, ${instruction(step)}.${then}`);
+      if (q) this._say(q);
+      if (step.type !== 'arrive') this.prefetchFn?.(this._nowText(step, then));
     }
 
     if (!this.flags.now && d <= nowDist && step.type !== 'arrive') {
       this.flags.now = true;
       this.flags.prepare = true;
-      const nowWord = TURNISH.has(step.type) && step.modifier !== 'straight' ? ' now' : '';
       const q = this._quip('now');
-      this._say(`${cap(instruction(step))}${nowWord}.${then}${q ? ` ${q}` : ''}`, { interrupt: true });
+      this._instr(this._nowText(step, then), { interrupt: true });
+      if (q) this._say(q);
     }
 
-    // Speeding nag (real GPS only). ~80 mph / 129 km/h.
-    if (!this.simulated && this.speed > 35.8 && t - this.lastSpeedWarn > 180000) {
-      this.lastSpeedWarn = t;
-      this._say(this._line('speeding'));
-    }
+    const sNow = this._s();
+    this._checkHazards(units, sNow.level, sNow.prof);
+    this._checkSpeed(t);
 
     this._lastPrepareDist = prepareDist;
     this._distToNext = d;
     this._emit(near, remaining);
+  }
+
+  _nowText(step, then) {
+    const nowWord = TURNISH.has(step.type) && step.modifier !== 'straight' ? ' now' : '';
+    return `${cap(instruction(step))}${nowWord}.${then}`;
   }
 
   tick() {
@@ -202,7 +355,8 @@ export class NavEngine {
       level >= 1 && chat > 0 && t >= this.nextIdleAt && t - this.lastSpeechAt > 30000 &&
       this.speed > 3 && (this._distToNext ?? 0) > (this._lastPrepareDist ?? 200) + 400
     ) {
-      this._say(this._line('idle'));
+      const dj = this.random() < 0.35 ? this._destLine('dest') : '';
+      this._say(dj || this._line('idle'));
       this._scheduleIdle();
     }
   }
@@ -213,6 +367,8 @@ export class NavEngine {
     const prev = r.steps[this.nextIdx - 1];
     const after = r.steps[this.nextIdx + 1];
     const remainingTime = r.duration * (remaining / (this.total || 1));
+    const nh = this.hazards.find((h) => h.along > this.progress);
+    const hazardAhead = nh && nh.along - this.progress < 3000 ? { ...nh, dist: nh.along - this.progress } : null;
     this.onState?.({
       step,
       then: after && after.type !== 'arrive' && after.along - step.along < 150 ? after : null,
@@ -223,6 +379,10 @@ export class NavEngine {
       eta: new Date(this.now() + remainingTime * 1000),
       routeBearing: near.bearing,
       progress: this.progress,
+      hazardAhead,
+      limit: this.limitAt(),
+      speed: this.speed,
+      quiet: this.quiet,
     });
   }
 }

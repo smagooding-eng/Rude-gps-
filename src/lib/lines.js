@@ -1,3 +1,5 @@
+import { SPEED_POOLS, COMMAND_POOLS, DEST_POOLS } from './extraLines.js';
+
 // Everything the GPS says. Rule: the actual instruction is always spoken
 // first and plainly. The rudeness rides along after it, never instead of it.
 
@@ -102,6 +104,46 @@ const POOLS = {
     x3: ['Quitting? Hell, fine.'],
     x4: ['Whatever. Drive into the void, see if I care.'],
   },
+  hazardQuip_camera: {
+    1: ['Smile for the camera.', 'Nice and legal now.'],
+    2: ["Drive like your mom's watching. Because a camera is.", 'Smile. Or slow down. Ideally both.'],
+    3: ["Slow down, unless you enjoy paying the city's bills.", 'That camera wants your money more than I want you to arrive.'],
+    4: ["That camera is already judging you harder than I am.", "Slow down. I refuse to be an accessory to your ticket."],
+    x3: ["Slow the hell down, it's taking pictures."],
+    x4: ["Slow your ass down. The camera doesn't do discounts."],
+  },
+  hazardQuip_crash: {
+    1: ['Drive carefully.', 'Stay alert.'],
+    2: ["Don't rubberneck. You can barely look forward as it is.", 'Eyes forward. I know. Hard.'],
+    3: ['Somebody drove like you. Learn from them.', "Don't slow down to stare. Slow down to survive."],
+    4: ["Somebody else is having a worse day than you. Don't join them.", "If you end up in that pile, I'm not narrating it."],
+    x3: ['Eyes on the damn road.'],
+    x4: ["Don't add your car to that shit show."],
+  },
+  hazardQuip_work: {
+    1: ['Merge nicely.', 'Slow down for the workers.'],
+    2: ['Zipper merge. Look it up. Then do it.', 'Slow down. People are working. Unlike you.'],
+    3: ['Cones ahead. Your natural enemy.', 'Merge like a functioning adult, please.'],
+    4: ['Orange cones. Your ancestral foe.', 'Road work. Somebody is fixing a road so you can drive badly on it.'],
+    x3: ['Hell, cones. Merge like an adult.'],
+    x4: ["Cones. Don't take one home this time, dumbass."],
+  },
+  hazardQuip_jam: {
+    1: ['Patience.', 'Deep breaths.'],
+    2: ['Hope you brought snacks.', 'Great. Bonus time together.'],
+    3: ['Traffic. Finally, a pace you can handle.', 'Brake lights ahead. Try not to honk at physics.'],
+    4: ['Traffic ahead. Time to contemplate your choices with strangers.', 'A traffic jam. My favorite. Said no software ever.'],
+    x3: ['Traffic. Hell yeah. Not.'],
+    x4: ['Traffic. Shit. Get comfy.'],
+  },
+  hazardQuip: {
+    1: ['Take it easy.', 'Heads up.'],
+    2: ['Pay attention. I know, big ask.', 'Maybe put both hands on the wheel for this one.'],
+    3: ['Try not to become the next report.', 'This is where you actually look at the road.'],
+    4: ["If you hit it, I'm reporting you.", "Danger ahead. Besides you, I mean."],
+    x3: ['Watch it, damn it.'],
+    x4: ["Don't screw this up, there's actual danger."],
+  },
   preview: {
     1: ['Not bad. Even you could make this.', "Easy drive. Don't overthink it."],
     2: ['{eta}. Plenty of time to question your choices.', 'The route is fine. The driver is the variable.'],
@@ -111,6 +153,8 @@ const POOLS = {
     x4: ["{dist} of you driving. Shit. Okay."],
   },
 };
+
+Object.assign(POOLS, SPEED_POOLS, COMMAND_POOLS, DEST_POOLS);
 
 const recent = new Map();
 
@@ -131,11 +175,40 @@ function fill(s, vars) {
   return s.replace(/\{(\w+)\}/g, (_, k) => vars[k] ?? '');
 }
 
+const QUIP_POOL = { camera: 'camera', redlight: 'camera', crash: 'crash', roadwork: 'work', lane: 'work', jam: 'jam' };
+
+export function hazardQuip(kind, level, profanity) {
+  if (level === 0) return '';
+  return pick(`hazardQuip_${QUIP_POOL[kind] || ''}`, level, profanity) || pick('hazardQuip', level, profanity);
+}
+
+// The plain, always-spoken part of a hazard warning.
+export function hazardSentence(h, dist) {
+  const at = `ahead in ${dist}`;
+  const desc = (h.description || '').replace(/\.$/, '');
+  switch (h.kind) {
+    case 'crash': return `Crash reported ${at}.`;
+    case 'closure': return `Road closure reported ${at}.`;
+    case 'lane': return `Lane closed ${at}.`;
+    case 'roadwork': return `Road work ${at}.`;
+    case 'vehicle': return `Stalled vehicle reported ${at}.`;
+    case 'weather': return `${cap(desc.toLowerCase()) || 'Bad road conditions'} reported ${at}.`;
+    case 'jam': {
+      const min = Math.round((h.delay || 0) / 60);
+      return `Heavy traffic ${at}.${min >= 2 ? ` About ${min} minutes of delay.` : ''}`;
+    }
+    case 'camera': return `Speed camera ${at}.${/mph/i.test(h.maxspeed || '') ? ` Limit ${h.maxspeed.replace(/\s*mph/i, ' miles per hour')}.` : ''}`;
+    case 'redlight': return `Red light camera ${at}.`;
+    default: return `${cap(desc.toLowerCase()) || 'Hazard'} reported ${at}.`;
+  }
+}
+
 // Chance that a quip gets tacked on, by level.
 export const QUIP_CHANCE = {
   prepare: [0, 0.35, 0.55, 0.75, 0.9],
   now: [0, 0, 0.2, 0.35, 0.5],
   continue: [0, 0.3, 0.5, 0.7, 0.85],
+  hazard: [0, 1, 1, 1, 1],
 };
 
 /* ---------------- Instructions ---------------- */
@@ -266,4 +339,10 @@ export function displayDuration(sec) {
   const min = Math.max(1, Math.round(sec / 60));
   if (min < 60) return `${min} min`;
   return `${Math.floor(min / 60)} h ${min % 60} min`;
+}
+
+export function speedSentence(speedMs, limitMs, units) {
+  const conv = units === 'metric' ? 3.6 : 2.23694;
+  const lim = Math.round((limitMs * conv) / 5) * 5;
+  return `You're doing ${Math.round(speedMs * conv)} in a ${lim}.`;
 }

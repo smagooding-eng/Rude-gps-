@@ -5,7 +5,7 @@ import { cumulative, distance } from './geo.js';
 const OSRM = 'https://router.project-osrm.org/route/v1/driving';
 
 export async function fetchRoute(from, to, signal) {
-  const url = `${OSRM}/${from[0]},${from[1]};${to[0]},${to[1]}?overview=full&geometries=geojson&steps=true`;
+  const url = `${OSRM}/${from[0]},${from[1]};${to[0]},${to[1]}?overview=full&geometries=geojson&steps=true&annotations=maxspeed`;
   const res = await fetch(url, { signal });
   if (!res.ok) throw new Error(`Routing service error (${res.status})`);
   return parseOsrm(await res.json());
@@ -46,5 +46,15 @@ export function parseOsrm(data) {
       });
     }
   }
-  return { coords, cum, distance: r.distance, duration: r.duration, steps };
+  // Posted speed limits per geometry segment (m/s), null where unknown.
+  let maxspeed = null;
+  const ann = r.legs.flatMap((l) => l.annotation?.maxspeed || []);
+  if (ann.length === coords.length - 1) {
+    maxspeed = ann.map((m) => {
+      if (!m || m.unknown || m.none || !Number.isFinite(m.speed)) return null;
+      return m.unit === 'mph' ? m.speed * 0.44704 : m.speed / 3.6;
+    });
+    if (!maxspeed.some((v) => v != null)) maxspeed = null;
+  }
+  return { coords, cum, distance: r.distance, duration: r.duration, steps, maxspeed };
 }

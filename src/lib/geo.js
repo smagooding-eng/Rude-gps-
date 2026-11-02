@@ -89,3 +89,15 @@ export function pointAlong(coords, cum, d) {
   const b = coords[hi];
   return { coords: [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t], bearing: bearing(a, b) };
 }
+
+// Index of the route segment containing distance d.
+export function segmentAt(cum, d) {
+  let lo = 0;
+  let hi = cum.length - 1;
+  while (hi - lo > 1) {
+    const mid = (lo + hi) >> 1;
+    if (cum[mid] <= d) lo = mid;
+    else hi = mid;
+  }
+  return lo;
+}
