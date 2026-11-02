@@ -7,7 +7,7 @@ export const BASE = {
 };
 
 export const MAP_THEMES = [
-  { id: 'auto', name: 'Auto' },
+  { id: 'auto', name: 'Auto (sun)' },
   { id: 'night', name: 'Night' },
   { id: 'day', name: 'Day' },
   { id: 'light', name: 'Classic' },

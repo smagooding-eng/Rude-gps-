@@ -5,6 +5,7 @@ import SettingsSheet from './components/SettingsSheet.jsx';
 import { NavBanner, NavFooter, HazardChip, SpeedSign } from './components/NavPanel.jsx';
 import { loadHazards, onRoute } from './lib/hazards.js';
 import { fetchSpeedLimits } from './lib/speedLimits.js';
+import { isDaytime } from './lib/sun.js';
 import { addReport, voteReport, reportsEnabled, REPORT_KINDS } from './lib/reports.js';
 import { ReportButton, ReportSheet, ConfirmCard } from './components/ReportSheet.jsx';
 import { Listener, listenSupported } from './lib/listener.js';
@@ -18,18 +19,6 @@ import { LEVELS, pick, displayDistance, displayDuration, spokenDuration, spokenD
 import { useSettings, load, save } from './lib/settings.js';
 
 const ONBOARD_KEY = 'rudegps.onboarded.v1';
-
-function useSystemDark() {
-  const [q] = useState(() => (typeof window !== 'undefined' ? window.matchMedia('(prefers-color-scheme: dark)') : null));
-  const [dark, setDark] = useState(q?.matches ?? false);
-  useEffect(() => {
-    if (!q) return undefined;
-    const fn = (e) => setDark(e.matches);
-    q.addEventListener('change', fn);
-    return () => q.removeEventListener('change', fn);
-  }, [q]);
-  return dark;
-}
 
 export default function App() {
   const [settings, update] = useSettings();
@@ -78,8 +67,16 @@ export default function App() {
   const planCtrl = useRef(null);
   destRef.current = dest;
 
-  const systemDark = useSystemDark();
-  const theme = settings.mapTheme === 'auto' ? (systemDark ? 'night' : 'day') : settings.mapTheme;
+  // Auto map: Day while the sun is up where you are, Night after sunset (like a car GPS).
+  const [clock, setClock] = useState(() => Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setClock(Date.now()), 5 * 60 * 1000);
+    return () => clearInterval(t);
+  }, []);
+  const sunCoords = gps?.coords || manualStart || null;
+  const sunKey = sunCoords ? `${sunCoords[0].toFixed(1)},${sunCoords[1].toFixed(1)}` : '';
+  const day = useMemo(() => isDaytime(new Date(clock), sunCoords), [clock, sunKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  const theme = settings.mapTheme === 'auto' ? (day ? 'day' : 'night') : settings.mapTheme;
 
   // Hospitals, funerals, places of worship: the GPS drops the act for the trip.
   const respectful = !!dest && RESPECT_CATEGORIES.has(dest.category);
