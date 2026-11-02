@@ -1,6 +1,6 @@
 // Shared driver reports via Supabase (PostgREST). See supabase/reports.sql.
 import { REPORTS } from '../config.js';
-import { load, save } from './settings.js';
+import { load, save } from './storage.js';
 
 export const REPORT_KINDS = [
   { id: 'police', label: 'Police', kind: 'police' },

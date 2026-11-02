@@ -7,6 +7,19 @@
 const synth = typeof window !== 'undefined' && 'speechSynthesis' in window ? window.speechSynthesis : null;
 const OPENAI_TTS = 'https://api.openai.com/v1/audio/speech';
 
+// Free on-device neural voices (Piper). ~60 MB download each, cached by the browser.
+export const NATURAL_VOICES = [
+  { id: 'en_US-hfc_female-medium', name: 'Hailey (US)' },
+  { id: 'en_US-hfc_male-medium', name: 'Hank (US)' },
+  { id: 'en_US-lessac-medium', name: 'Lessac (US)' },
+  { id: 'en_US-ryan-medium', name: 'Ryan (US)' },
+  { id: 'en_US-amy-medium', name: 'Amy (US)' },
+  { id: 'en_US-joe-medium', name: 'Joe (US)' },
+  { id: 'en_US-kristin-medium', name: 'Kristin (US)' },
+  { id: 'en_GB-alan-medium', name: 'Alan (UK)' },
+  { id: 'en_GB-jenny_dioco-medium', name: 'Jenny (UK)' },
+];
+
 export const AI_VOICES = ['ash', 'coral', 'onyx', 'nova', 'sage', 'ballad', 'verse', 'echo', 'alloy', 'fable', 'shimmer'];
 
 const BASE_DIRECTION = 'You are the voice of a car navigation app. Read every direction, street name and distance clearly and at a natural pace; the attitude rides on top and never makes a direction hard to understand.';
@@ -18,7 +31,7 @@ export const ACTING = [
   'Unhinged and dramatic, on the edge of a breakdown. Over-the-top exasperation, sudden bursts of intensity, great comic timing.',
 ];
 
-let opts = { engine: 'device', voiceURI: '', rate: 1, pitch: 1, muted: false, aiKey: '', aiVoice: 'ash', level: 2, onAiError: null };
+let opts = { naturalVoice: 'en_US-hfc_male-medium', onNaturalProgress: null, engine: 'device', voiceURI: '', rate: 1, pitch: 1, muted: false, aiKey: '', aiVoice: 'ash', level: 2, onAiError: null };
 
 /* ---------------- Device voices ---------------- */
 
@@ -57,6 +70,73 @@ function speakDevice(text, interrupt) {
   synth.speak(u);
 }
 
+/* ---------------- Natural (on-device neural) voice ---------------- */
+
+let worker = null;
+let msgId = 0;
+const pending = new Map();
+const readyVoices = new Set();
+const downloading = new Map();
+
+function getWorker() {
+  if (!worker) {
+    worker = new Worker(new URL('./ttsWorker.js', import.meta.url), { type: 'module' });
+    worker.onmessage = (e) => {
+      const m = e.data;
+      if (m.type === 'progress') {
+        opts.onNaturalProgress?.(m.total ? m.loaded / m.total : 0, m.voiceId);
+        return;
+      }
+      const p = pending.get(m.id);
+      if (!p) return;
+      pending.delete(m.id);
+      if (m.type === 'error') p.reject(new Error(m.message));
+      else p.resolve(m);
+    };
+    worker.onerror = () => {
+      for (const p of pending.values()) p.reject(new Error('Natural voice crashed'));
+      pending.clear();
+      worker = null;
+    };
+  }
+  return worker;
+}
+
+function ask(msg) {
+  return new Promise((resolve, reject) => {
+    const id = ++msgId;
+    pending.set(id, { resolve, reject });
+    getWorker().postMessage({ ...msg, id });
+  });
+}
+
+// Download a natural voice ahead of time (once; cached afterwards).
+export function prepareNatural(voiceId = opts.naturalVoice) {
+  if (readyVoices.has(voiceId)) return Promise.resolve();
+  if (!downloading.has(voiceId)) {
+    const p = ask({ type: 'download', voiceId })
+      .then(() => {
+        readyVoices.add(voiceId);
+        opts.onNaturalProgress?.(1, voiceId);
+      })
+      .finally(() => downloading.delete(voiceId));
+    downloading.set(voiceId, p);
+  }
+  return downloading.get(voiceId);
+}
+
+async function synthesizeNatural(text) {
+  const voiceId = opts.naturalVoice;
+  // Until the voice is downloaded, don't wait on it: the phone voice covers.
+  if (!readyVoices.has(voiceId)) {
+    prepareNatural(voiceId).catch(() => {});
+    return null;
+  }
+  const m = await ask({ type: 'predict', text, voiceId });
+  const ac = audioCtx();
+  return new Promise((resolve, reject) => ac.decodeAudioData(m.buf, resolve, reject));
+}
+
 /* ---------------- AI voice ---------------- */
 
 let ctx = null;
@@ -75,7 +155,7 @@ function audioCtx() {
 }
 
 function cacheKey(text) {
-  return `${opts.aiVoice}|${opts.level}|${text}`;
+  return opts.engine === 'natural' ? `n|${opts.naturalVoice}|${text}` : `${opts.aiVoice}|${opts.level}|${text}`;
 }
 
 export async function synthesize(text, { key = opts.aiKey, voice = opts.aiVoice, level = opts.level, signal } = {}) {
@@ -108,13 +188,18 @@ let lastErrorAt = 0;
 function clip(text) {
   const k = cacheKey(text);
   if (!cache.has(k)) {
-    const p = synthesize(text).catch((e) => {
+    const job = opts.engine === 'natural' ? synthesizeNatural(text) : synthesize(text);
+    const p = job.catch((e) => {
       cache.delete(k);
-      if (Date.now() - lastErrorAt > 60000) {
+      if (opts.engine === 'ai' && Date.now() - lastErrorAt > 60000) {
         lastErrorAt = Date.now();
         opts.onAiError?.(e.message);
       }
       return null;
+    });
+    // Natural voice still downloading: don't cache the miss.
+    p.then((b) => {
+      if (!b) cache.delete(k);
     });
     cache.set(k, p);
     if (cache.size > 80) cache.delete(cache.keys().next().value);
@@ -192,7 +277,7 @@ export const voice = {
   },
 
   get usingAi() {
-    return opts.engine === 'ai' && !!opts.aiKey;
+    return (opts.engine === 'ai' && !!opts.aiKey) || opts.engine === 'natural';
   },
 
   // iOS only allows audio after a user gesture; call this from a tap.

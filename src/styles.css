@@ -219,3 +219,6 @@ select { width: 100%; padding: 12px; border-radius: 12px; background: var(--asph
 .confirm-card { position: absolute; z-index: 7; left: 12px; right: 12px; bottom: calc(var(--safe-bottom) + 190px); display: flex; align-items: center; gap: 8px; background: var(--asphalt); border: 1px solid var(--hz); border-radius: 16px; padding: 8px 10px; box-shadow: var(--shadow); animation: rise .25s ease-out; }
 .confirm-card strong { flex: 1; min-width: 0; font-size: 15px; }
 .confirm-card .chip { padding: 10px 16px; font-size: 14px; }
+
+.voice-progress { position: absolute; z-index: 30; left: 50%; transform: translateX(-50%); top: calc(var(--safe-top) + 84px); background: var(--asphalt); border: 1px solid var(--line); padding: 8px 14px 12px; border-radius: 12px; font-size: 13px; font-weight: 700; box-shadow: var(--shadow); min-width: 200px; text-align: center; }
+.voice-progress span { position: absolute; left: 0; bottom: 0; height: 4px; background: var(--caution); border-radius: 0 0 0 12px; transition: width .3s; }

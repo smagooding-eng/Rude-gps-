@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react';
 import { LEVELS, pick } from '../lib/lines.js';
-import { voice, AI_VOICES, synthesize } from '../lib/voice.js';
+import { voice, AI_VOICES, NATURAL_VOICES, synthesize, prepareNatural } from '../lib/voice.js';
 import { MAP_THEMES } from '../lib/mapTheme.js';
 import { listenSupported } from '../lib/listener.js';
 
-export default function SettingsSheet({ settings, update, onClose }) {
+export default function SettingsSheet({ settings, update, onClose, voiceProgress }) {
   const [voices, setVoices] = useState(voice.list());
   const [aiStatus, setAiStatus] = useState('');
   useEffect(() => voice.onVoicesChanged(() => setVoices(voice.list())), []);
@@ -19,6 +19,16 @@ export default function SettingsSheet({ settings, update, onClose }) {
 
   const test = async () => {
     voice.unlock();
+    if (settings.voiceEngine === 'natural') {
+      setAiStatus('Getting the voice ready…');
+      try {
+        await prepareNatural(settings.naturalVoice);
+        setAiStatus('');
+      } catch {
+        setAiStatus("Couldn't download the voice. Check your connection.");
+        return;
+      }
+    }
     if (settings.voiceEngine === 'ai' && settings.aiKey) {
       setAiStatus('Generating…');
       try {
@@ -77,11 +87,28 @@ export default function SettingsSheet({ settings, update, onClose }) {
         <section>
           <label className="label">Voice</label>
           <div className="seg">
-            <button className={settings.voiceEngine !== 'ai' ? 'on' : ''} onClick={() => update({ voiceEngine: 'device' })}>Phone voice (free)</button>
+            <button className={settings.voiceEngine === 'natural' ? 'on' : ''} onClick={() => update({ voiceEngine: 'natural' })}>Natural</button>
+            <button className={settings.voiceEngine === 'device' ? 'on' : ''} onClick={() => update({ voiceEngine: 'device' })}>Phone</button>
             <button className={settings.voiceEngine === 'ai' ? 'on' : ''} onClick={() => update({ voiceEngine: 'ai' })}>AI actor</button>
           </div>
 
-          {settings.voiceEngine !== 'ai' ? (
+          {settings.voiceEngine === 'natural' && (
+            <>
+              <select id="naturalVoice" className="mt" value={settings.naturalVoice} onChange={(e) => update({ naturalVoice: e.target.value })}>
+                {NATURAL_VOICES.map((v) => (
+                  <option key={v.id} value={v.id}>{v.name}</option>
+                ))}
+              </select>
+              <p className="hint">
+                A free AI voice that runs on your phone. No key, no account, works offline after a one-time
+                download of about 60 MB per voice (use Wi-Fi). Until it&rsquo;s downloaded, the phone voice fills in.
+                {voiceProgress != null && ` Downloading: ${Math.round(voiceProgress * 100)}%.`}
+              </p>
+              {aiStatus && <p className="hint">{aiStatus}</p>}
+            </>
+          )}
+
+          {settings.voiceEngine === 'natural' ? null : settings.voiceEngine !== 'ai' ? (
             <>
               <select id="voice" value={settings.voiceURI} onChange={(e) => update({ voiceURI: e.target.value })} className="mt">
                 <option value="">Best available{best ? ` (${best.name})` : ''}</option>

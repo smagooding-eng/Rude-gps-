@@ -12,7 +12,7 @@ import { RESPECT_CATEGORIES } from './lib/extraLines.js';
 import { fetchRoute } from './lib/routing.js';
 import { NavEngine } from './lib/navEngine.js';
 import { Simulator } from './lib/simulator.js';
-import { voice } from './lib/voice.js';
+import { voice, prepareNatural } from './lib/voice.js';
 import { bearing, distance, pointAlong } from './lib/geo.js';
 import { LEVELS, pick, displayDistance, displayDuration, spokenDuration, spokenDistance } from './lib/lines.js';
 import { useSettings, load, save } from './lib/settings.js';
@@ -55,6 +55,7 @@ export default function App() {
   const [hazards, setHazards] = useState([]);
   const [listen, setListen] = useState('off');
   const [demoMode, setDemoMode] = useState('normal');
+  const [voiceProgress, setVoiceProgress] = useState(null);
   const [showReport, setShowReport] = useState(false);
   const [confirmAsk, setConfirmAsk] = useState(null);
   const confirmRef = useRef(null);
@@ -94,10 +95,18 @@ export default function App() {
       engine: settings.voiceEngine,
       aiKey: settings.aiKey,
       aiVoice: settings.aiVoice,
+      naturalVoice: settings.naturalVoice,
+      onNaturalProgress: (f) => setVoiceProgress(f >= 1 ? null : f),
       level: effLevel,
       onAiError: (msg) => setToast(`${msg} Using the phone voice for now.`),
     });
-  }, [settings.voiceURI, settings.rate, settings.muted, settings.voiceEngine, settings.aiKey, settings.aiVoice, effLevel]);
+  }, [settings.voiceURI, settings.rate, settings.muted, settings.voiceEngine, settings.aiKey, settings.aiVoice, settings.naturalVoice, effLevel]);
+
+  // Fetch the natural voice in the background as soon as it's selected.
+  useEffect(() => {
+    if (settings.voiceEngine !== 'natural') return;
+    prepareNatural(settings.naturalVoice).catch(() => setToast("Couldn't download the natural voice. Using the phone voice."));
+  }, [settings.voiceEngine, settings.naturalVoice]);
 
   // What the engine sees: the real settings, with the level forced to Nice on respectful trips.
   const engineSettings = useCallback(() => {
@@ -636,8 +645,14 @@ export default function App() {
       )}
 
       {toast && <div className="toast" role="status">{toast}</div>}
+      {voiceProgress != null && (
+        <div className="voice-progress" role="status">
+          Downloading voice {Math.round(voiceProgress * 100)}%
+          <span style={{ width: `${Math.round(voiceProgress * 100)}%` }} />
+        </div>
+      )}
 
-      {showSettings && <SettingsSheet settings={settings} update={update} onClose={() => setShowSettings(false)} />}
+      {showSettings && <SettingsSheet settings={settings} update={update} onClose={() => setShowSettings(false)} voiceProgress={voiceProgress} />}
 
       {!onboarded && (
         <div className="onboard">
